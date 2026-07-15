@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+import json
+import os
+import stat
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from compshare_cli.errors import ConfigError
+
+DEFAULT_PROFILE = "default"
+DEFAULT_REGION = "cn-wlcb"
+DEFAULT_ZONE = "cn-wlcb-01"
+DEFAULT_BASE_URL = "https://api.compshare.cn"
+
+
+def config_path() -> Path:
+    override = os.environ.get("COMPSHARE_CONFIG_FILE")
+    if override:
+        return Path(override).expanduser()
+    root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return root / "compshare" / "config.json"
+
+
+@dataclass(frozen=True)
+class Profile:
+    public_key: str
+    private_key: str
+
+    def sdk_config(self, region: str) -> Dict[str, Any]:
+        return {
+            "public_key": self.public_key,
+            "private_key": self.private_key,
+            "region": region,
+            "base_url": DEFAULT_BASE_URL,
+        }
+
+
+class ConfigStore:
+    def __init__(self, path: Optional[Path] = None) -> None:
+        self.path = path or config_path()
+
+    def _read(self) -> Dict[str, Any]:
+        if not self.path.exists():
+            return {"current_profile": DEFAULT_PROFILE, "profiles": {}}
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ConfigError(f"无法读取配置文件 {self.path}: {exc}") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("profiles", {}), dict):
+            raise ConfigError(f"配置文件格式无效: {self.path}")
+        return data
+
+    def save_profile(self, name: str, profile: Profile, *, activate: bool = True) -> None:
+        data = self._read()
+        profiles = data.setdefault("profiles", {})
+        profiles[name] = {key: value for key, value in asdict(profile).items() if value is not None}
+        if activate:
+            data["current_profile"] = name
+        self._write(data)
+
+    def load_language(self) -> Optional[str]:
+        value = self._read().get("language")
+        return str(value) if value else None
+
+    def save_language(self, language: str) -> None:
+        data = self._read()
+        data["language"] = language
+        self._write(data)
+
+    def _write(self, data: Dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.path.parent, stat.S_IRWXU)
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
+        temporary.replace(self.path)
+        os.chmod(self.path, stat.S_IRUSR | stat.S_IWUSR)
+
+    def load_profile(self, name: Optional[str] = None) -> Profile:
+        data = self._read()
+        selected = (
+            name
+            or os.environ.get("COMPSHARE_PROFILE")
+            or data.get("current_profile", DEFAULT_PROFILE)
+        )
+        raw = data.get("profiles", {}).get(selected, {})
+
+        public_key = os.environ.get("COMPSHARE_PUBLIC_KEY") or raw.get("public_key")
+        private_key = os.environ.get("COMPSHARE_PRIVATE_KEY") or raw.get("private_key")
+        if not public_key or not private_key:
+            raise ConfigError(
+                "尚未配置 API 密钥。请运行 `compshare config --name NAME`，或设置 "
+                "COMPSHARE_PUBLIC_KEY 和 COMPSHARE_PRIVATE_KEY。"
+            )
+
+        return Profile(
+            public_key=str(public_key),
+            private_key=str(private_key),
+        )

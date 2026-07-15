@@ -51,10 +51,25 @@ def test_language_is_saved_outside_credential_profiles(tmp_path) -> None:
     assert set(saved["profiles"]["default"]) == {"public_key", "private_key"}
 
 
+def test_profile_management(tmp_path) -> None:
+    store = ConfigStore(tmp_path / "config.json")
+    store.save_profile("alpha", Profile("a", "secret-a"))
+    store.save_profile("beta", Profile("b", "secret-b"), activate=False)
+
+    assert store.list_profiles() == ["alpha", "beta"]
+    assert store.current_profile() == "alpha"
+    store.use_profile("beta")
+    assert store.current_profile() == "beta"
+    store.delete_profile("beta")
+    assert store.list_profiles() == ["alpha"]
+    assert store.current_profile() == "alpha"
+
+
 def test_runtime_location_is_independent_from_credentials(monkeypatch) -> None:
     monkeypatch.delenv("COMPSHARE_REGION", raising=False)
     monkeypatch.delenv("COMPSHARE_ZONE", raising=False)
-    state = Runtime(zone_override="cn-sh2-02")
+    monkeypatch.setenv("COMPSHARE_ZONE", "cn-sh2-02")
+    state = Runtime()
     assert state.region == "cn-sh2"
     assert state.zone == "cn-sh2-02"
 

@@ -40,6 +40,10 @@ compshare config --name production
 
 ```bash
 compshare --profile production instance list
+compshare config list
+compshare config use production
+compshare config delete staging
+compshare config path
 ```
 
 也可以完全通过环境变量运行：
@@ -57,24 +61,25 @@ export COMPSHARE_ZONE='cn-wlcb-01'
 
 ```text
 --profile       选择凭证 profile
---region        指定本次请求的地域，不写入凭证
---zone          指定本次请求的可用区，不写入凭证
 --json          输出适合脚本处理的 JSON
 ```
 
-例如临时查询上海地域：
+地域和可用区是资源参数，不是全局选项。它们会出现在真正需要位置的子命令后面：
 
 ```bash
-compshare --region cn-sh2 --zone cn-sh2-02 instance list
+compshare instance list --region cn-sh2
+compshare instance create --zone cn-sh2-02
 ```
 
-`ProjectId` 不是账户凭证的一部分。只有实例列表筛选、定时关机等需要项目范围的命令才提供自己的 `--project-id` 参数。
+实例和已挂载云盘的生命周期命令会根据资源 ID 自动查找 Region 和 Zone。列表命令未指定 `--region` 时会聚合所有支持地域。
 
-`--json` 可以放在命令前或命令后：
+`ProjectId` 不是账户凭证的一部分。定时关机会通过 `GetProjectList` 自动选择默认项目；只有需要覆盖自动选择结果时才传 `--project-id`。
+
+`--json` 和 `--profile` 是全局选项，必须放在子命令前：
 
 ```bash
 compshare --json instance list
-compshare instance list --json
+compshare --profile production instance list
 ```
 
 成功时 JSON 模式直接输出 API 响应；失败时输出 `{"ok":false,"error":"..."}` 并返回非零退出码。实例密码和 FileBrowser 密码保留 API 原值，API 私钥仍会脱敏。
@@ -148,6 +153,14 @@ compshare instance create \
 
 创建前会依次检查目标组合库存和价格，得到确认后才创建。自动化中可使用 `--yes` 跳过最终确认。`--json` 不会启动交互向导，因此必须同时提供 `--gpu`、`--count`、`--cpu`、`--memory` 和 `--image`。
 
+可以先检查库存、价格和最终请求，但不创建资源：
+
+```bash
+compshare instance create ... --dry-run --json
+```
+
+人类交互终端默认等待创建和生命周期操作进入稳定状态，脚本使用的 JSON 模式默认提交后立即返回。可以用 `--wait`、`--no-wait` 和 `--timeout` 显式控制；创建镜像也支持相同选项。
+
 ### 命令概览
 
 ```text
@@ -166,7 +179,7 @@ compshare instance password INSTANCE
 compshare instance reinstall INSTANCE
 compshare instance resize INSTANCE
 compshare instance price
-compshare instance upgrade-price INSTANCE
+compshare instance resize-price INSTANCE
 compshare instance billing
 compshare instance refund INSTANCE...
 compshare instance monitor [INSTANCE...]
@@ -176,8 +189,8 @@ compshare instance models
 compshare instance ssh INSTANCE
 compshare instance ports list
 compshare instance ports update INSTANCE
-compshare instance schedule set INSTANCE --at 2026-07-16T12:00:00+08:00 --project-id PROJECT
-compshare instance schedule cancel INSTANCE --project-id PROJECT
+compshare instance schedule set INSTANCE --at 2h
+compshare instance schedule cancel INSTANCE
 compshare instance software list
 compshare instance software url INSTANCE JupyterLab
 ```
@@ -185,6 +198,10 @@ compshare instance software url INSTANCE JupyterLab
 `ssh` 会在连接前显示 API 返回的实例密码；使用 `ssh INSTANCE --print` 时会同时输出 SSH 命令和密码。
 
 `resize` 明确区分计算规格调整和磁盘扩容，两者不能放在同一次请求中。执行删除、关机、重启、重装、改配等高影响操作时默认要求确认。
+
+`instance list` 支持 `--name`、`--status`、`--gpu` 和 `--billing` 组合筛选。`instance show` 默认显示重点字段卡片，使用 `--json` 时保留完整 API 响应。旧命令 `upgrade-price` 仍兼容，但帮助中统一使用 `resize-price`。
+
+生产实测中 `monitor` 和 `software url` 对应接口当前不可用，CLI 会在帮助和 API 错误提示中明确标记；命令仍保留，便于服务端恢复后直接使用。
 
 ## 镜像
 
@@ -219,6 +236,8 @@ compshare image tags
 
 社区镜像列表支持名称、作者、模糊查询、标签、免费/付费、官方/非官方、自启动和排序筛选。封面文件由 CLI 转成 Base64，README 文件按 UTF-8 读取。
 
+创建镜像时可使用 `--wait` 跟踪 `GetCompShareImageCreateProgress`，或继续使用独立的 `image progress` 命令。
+
 ## 磁盘与云存储
 
 ```text
@@ -233,6 +252,8 @@ compshare storage us3 attach --instance INSTANCE
 ```
 
 `storage us3 attach` 覆盖 CompShare 的 US3 挂载 Action。对象上传、下载、Bucket 管理继续使用独立的 `us3cli`，避免在本 CLI 中复制另一套成熟工具的能力。
+
+云盘删除会对“仍在卸载中”的暂时性错误自动重试；其他已知生产错误会附带可执行的处理建议。
 
 ## 开发校验
 

@@ -4,6 +4,9 @@ from typing import Any, Dict, Optional
 
 import typer
 
+from compshare_cli.i18n import tr
+from compshare_cli.location import region_from_zone
+from compshare_cli.output import Renderer
 from compshare_cli.runtime import Runtime
 
 
@@ -19,12 +22,17 @@ def request(
     *,
     zone: bool = False,
     project_id: Optional[str] = None,
+    region_value: Optional[str] = None,
     zone_value: Optional[str] = None,
 ) -> Dict[str, Any]:
     state = runtime(ctx)
-    payload: Dict[str, Any] = {"Region": state.region}
+    resolved_zone = zone_value or (state.zone if zone else None)
+    resolved_region = region_value or (
+        region_from_zone(resolved_zone) if resolved_zone else state.region
+    )
+    payload: Dict[str, Any] = {"Region": resolved_region}
     if zone:
-        payload["Zone"] = zone_value or state.zone
+        payload["Zone"] = resolved_zone
     if project_id:
         payload["ProjectId"] = project_id
     return payload
@@ -33,5 +41,17 @@ def request(
 def confirm(message: str, yes: bool) -> None:
     if yes:
         return
-    if not typer.confirm(message):
+    if not typer.confirm(tr(message)):
         raise typer.Abort()
+
+
+def confirm_details(
+    state: Runtime,
+    title: str,
+    fields: list[tuple[str, Any]],
+    prompt: str,
+    yes: bool,
+) -> None:
+    if not state.json_output:
+        Renderer(False).details(title, fields)
+    confirm(prompt, yes)

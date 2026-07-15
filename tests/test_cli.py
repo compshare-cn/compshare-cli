@@ -28,17 +28,29 @@ def test_help_tree(args) -> None:
     assert "Usage:" in result.stdout
 
 
-def test_global_json_is_accepted_after_command(capsys) -> None:
-    cli.main(["version", "--json"])
+def test_global_json_is_accepted_before_command(capsys) -> None:
+    cli.main(["--json", "version"])
     assert json.loads(capsys.readouterr().out) == {"version": "0.1.0"}
 
 
-def test_config_error_is_json_when_flag_is_after_command(monkeypatch, tmp_path, capsys) -> None:
+def test_global_profile_is_accepted_before_command(capsys) -> None:
+    cli.main(["--profile", "testing", "--json", "version"])
+    assert json.loads(capsys.readouterr().out) == {"version": "0.1.0"}
+
+
+def test_global_options_after_command_are_rejected(capsys) -> None:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["version", "--json"])
+    assert raised.value.code == 2
+    assert "No such option: --json" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_config_error_is_json(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(tmp_path / "missing.json"))
     monkeypatch.delenv("COMPSHARE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("COMPSHARE_PRIVATE_KEY", raising=False)
     with pytest.raises(SystemExit) as raised:
-        cli.main(["instance", "list", "--json"])
+        cli.main(["--json", "instance", "list"])
     assert raised.value.code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
@@ -60,9 +72,31 @@ def test_credential_configuration_does_not_include_resource_scope() -> None:
     assert "--project-id" in schedule_help.stdout
     assert "--install-completion" not in root_help.stdout
     assert "--show-completion" not in root_help.stdout
-    assert root_help.stdout.index("--profile") < root_help.stdout.index("--region")
-    assert root_help.stdout.index("--region") < root_help.stdout.index("--zone")
-    assert root_help.stdout.index("--zone") < root_help.stdout.index("--json")
+    assert "--region" not in root_help.stdout
+    assert "--zone" not in root_help.stdout
+    assert root_help.stdout.index("--profile") < root_help.stdout.index("--json")
+
+
+def test_config_profile_commands(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(path))
+
+    saved = runner.invoke(
+        cli.app,
+        ["config", "set", "--name", "work", "--public-key", "pub", "--private-key", "sec"],
+    )
+    assert saved.exit_code == 0, saved.output
+
+    listed = runner.invoke(cli.app, ["--json", "config", "list"])
+    assert listed.exit_code == 0, listed.output
+    assert json.loads(listed.stdout)["profiles"] == [{"Profile": "work", "Active": True}]
+
+    shown_path = runner.invoke(cli.app, ["config", "path"])
+    assert shown_path.exit_code == 0
+    assert shown_path.stdout.strip() == str(path)
+
+    deleted = runner.invoke(cli.app, ["config", "delete", "work", "--yes"])
+    assert deleted.exit_code == 0, deleted.output
 
 
 def test_lang_command_persists_help_language(monkeypatch, tmp_path, capsys) -> None:
@@ -96,10 +130,10 @@ def test_lang_command_persists_help_language(monkeypatch, tmp_path, capsys) -> N
 def test_lang_command_shows_current_language_as_json(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(tmp_path / "config.json"))
     monkeypatch.delenv("COMPSHARE_LANG", raising=False)
-    cli.main(["lang", "en", "--json"])
+    cli.main(["--json", "lang", "en"])
     assert json.loads(capsys.readouterr().out) == {"ok": True, "language": "en"}
 
-    cli.main(["lang", "--json"])
+    cli.main(["--json", "lang"])
     assert json.loads(capsys.readouterr().out) == {"language": "en"}
 
 
@@ -274,7 +308,7 @@ def test_create_interactive_wizard_resolves_all_required_parameters(monkeypatch)
 
 def test_create_json_requires_explicit_parameters(capsys) -> None:
     with pytest.raises(SystemExit) as raised:
-        cli.main(["instance", "create", "--json"])
+        cli.main(["--json", "instance", "create"])
     assert raised.value.code == 2
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
@@ -327,6 +361,104 @@ def test_create_explicit_json_mode_skips_discovery(monkeypatch) -> None:
     assert json.loads(result.stdout)["selection"]["ChargeType"] == "Postpay"
 
 
+def test_create_dry_run_never_calls_create(monkeypatch) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append(action)
+        if action == "CheckCompShareResourceCapacity":
+            return {"Specs": [{"Gpu": 1, "Cpu": 12, "Mem": 32, "ResourceEnough": True}]}
+        if action == "GetCompShareInstancePrice":
+            return {"PriceDetails": [{"Instance": 0.7}]}
+        raise AssertionError(action)
+
+    monkeypatch.setattr(instance, "call", fake_call)
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "instance",
+            "create",
+            "--gpu",
+            "3080Ti",
+            "--count",
+            "1",
+            "--cpu",
+            "12",
+            "--memory",
+            "32GiB",
+            "--image",
+            "image-1",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["CheckCompShareResourceCapacity", "GetCompShareInstancePrice"]
+    assert json.loads(result.stdout)["dry_run"] is True
+
+
+def test_instance_wait_polls_until_running(monkeypatch) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append(action)
+        if action == "StartCompShareInstance":
+            return {"RetCode": 0}
+        return {"UHostSet": [{"UHostId": "uhost-1", "State": "Running"}]}
+
+    monkeypatch.setattr(instance, "call", fake_call)
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-wlcb",
+            "cn-wlcb-01",
+            {"UHostId": value, "State": "Running", "Zone": "cn-wlcb-01"},
+        ),
+    )
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "start", "uhost-1", "--wait"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["StartCompShareInstance", "DescribeCompShareInstance"]
+    assert json.loads(result.stdout)["final"]["UHostSet"][0]["State"] == "Running"
+
+
+def test_schedule_auto_detects_project_id(monkeypatch) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append((action, params))
+        return {"ProjectSet": [{"ProjectId": "org-default", "IsDefault": True}]}
+
+    def fake_invoke(state, action, params, **kwargs):
+        calls.append((action, params))
+        return {"RetCode": 0}
+
+    monkeypatch.setattr(instance, "call", fake_call)
+    monkeypatch.setattr(instance, "invoke", fake_invoke)
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-bj2",
+            "cn-bj2-03",
+            {"UHostId": value, "Zone": "cn-bj2-03"},
+        ),
+    )
+    result = runner.invoke(
+        cli.app,
+        ["instance", "schedule", "set", "uhost-1", "--at", "2h"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0] == ("GetProjectList", {})
+    assert calls[1][1]["ProjectId"] == "org-default"
+
+
 def test_monitor_omits_production_rejected_zone(monkeypatch) -> None:
     calls = []
 
@@ -337,13 +469,11 @@ def test_monitor_omits_production_rejected_zone(monkeypatch) -> None:
     monkeypatch.setattr(instance, "invoke", fake_invoke)
     result = runner.invoke(
         cli.app,
-        ["--region", "cn-bj2", "--zone", "cn-bj2-03", "instance", "monitor", "cpod-1"],
+        ["instance", "monitor", "cpod-1", "--region", "cn-bj2"],
     )
 
     assert result.exit_code == 0, result.output
-    assert calls == [
-        ("GetCompShareInstanceMonitor", {"Region": "cn-bj2", "UHostIds": ["cpod-1"]})
-    ]
+    assert calls == [("GetCompShareInstanceMonitor", {"Region": "cn-bj2", "UHostIds": ["cpod-1"]})]
 
 
 def test_software_url_includes_required_zone(monkeypatch) -> None:
@@ -354,13 +484,18 @@ def test_software_url_includes_required_zone(monkeypatch) -> None:
         return {"RetCode": 0, "URL": "https://example.invalid"}
 
     monkeypatch.setattr(instance, "invoke", fake_invoke)
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-bj2",
+            "cn-bj2-03",
+            {"UHostId": value, "Zone": "cn-bj2-03"},
+        ),
+    )
     result = runner.invoke(
         cli.app,
         [
-            "--region",
-            "cn-bj2",
-            "--zone",
-            "cn-bj2-03",
             "instance",
             "software",
             "url",
@@ -386,15 +521,17 @@ def test_software_url_includes_required_zone(monkeypatch) -> None:
 def test_ssh_print_includes_instance_password(monkeypatch) -> None:
     monkeypatch.setattr(
         instance,
-        "call",
-        lambda state, action, params: {
-            "UHostSet": [
-                {
-                    "SshLoginCommand": "ssh root@example.invalid",
-                    "Password": "instance-secret",
-                }
-            ]
-        },
+        "locate_instance",
+        lambda state, value: (
+            "cn-wlcb",
+            "cn-wlcb-01",
+            {
+                "UHostId": value,
+                "Zone": "cn-wlcb-01",
+                "SshLoginCommand": "ssh root@example.invalid",
+                "Password": "instance-secret",
+            },
+        ),
     )
     result = runner.invoke(
         cli.app,
@@ -412,15 +549,17 @@ def test_ssh_print_includes_instance_password(monkeypatch) -> None:
 def test_ssh_shows_password_before_connecting(monkeypatch) -> None:
     monkeypatch.setattr(
         instance,
-        "call",
-        lambda state, action, params: {
-            "UHostSet": [
-                {
-                    "SshLoginCommand": "ssh root@example.invalid",
-                    "Password": "instance-secret",
-                }
-            ]
-        },
+        "locate_instance",
+        lambda state, value: (
+            "cn-wlcb",
+            "cn-wlcb-01",
+            {
+                "UHostId": value,
+                "Zone": "cn-wlcb-01",
+                "SshLoginCommand": "ssh root@example.invalid",
+                "Password": "instance-secret",
+            },
+        ),
     )
     commands = []
     monkeypatch.setattr(instance.subprocess, "call", lambda argv: commands.append(argv) or 0)

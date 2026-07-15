@@ -2,6 +2,7 @@ import base64
 
 import pytest
 
+from compshare_cli import parsing
 from compshare_cli.errors import UsageError
 from compshare_cli.parsing import disk_gib, encode_password, memory_mib, timestamp
 
@@ -24,3 +25,10 @@ def test_password_and_timestamp_encoding() -> None:
     assert encode_password("ucloud.cn") == base64.b64encode(b"ucloud.cn").decode("ascii")
     assert timestamp("1970-01-01T08:00:01+08:00") == 1
     assert timestamp("123") == 123
+
+
+def test_relative_timestamp(monkeypatch) -> None:
+    monkeypatch.setattr(parsing.time, "time", lambda: 1_000)
+    assert timestamp("30m") == 2_800
+    assert timestamp("2h") == 8_200
+    assert timestamp("1d") == 87_400

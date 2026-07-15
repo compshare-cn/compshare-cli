@@ -5,7 +5,7 @@ import os
 import stat
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from compshare_cli.errors import ConfigError
 
@@ -58,6 +58,29 @@ class ConfigStore:
         profiles[name] = {key: value for key, value in asdict(profile).items() if value is not None}
         if activate:
             data["current_profile"] = name
+        self._write(data)
+
+    def list_profiles(self) -> List[str]:
+        return sorted(self._read().get("profiles", {}))
+
+    def current_profile(self) -> str:
+        return str(self._read().get("current_profile", DEFAULT_PROFILE))
+
+    def use_profile(self, name: str) -> None:
+        data = self._read()
+        if name not in data.get("profiles", {}):
+            raise ConfigError(f"Credential profile does not exist: {name}")
+        data["current_profile"] = name
+        self._write(data)
+
+    def delete_profile(self, name: str) -> None:
+        data = self._read()
+        profiles = data.get("profiles", {})
+        if name not in profiles:
+            raise ConfigError(f"Credential profile does not exist: {name}")
+        del profiles[name]
+        if data.get("current_profile") == name:
+            data["current_profile"] = next(iter(sorted(profiles)), DEFAULT_PROFILE)
         self._write(data)
 
     def load_language(self) -> Optional[str]:

@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import sys
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
 import typer
 
 from compshare_cli.api import call, invoke
-from compshare_cli.commands.common import confirm, request, runtime
+from compshare_cli.commands.common import confirm, confirm_details, request, runtime
 from compshare_cli.errors import UsageError
+from compshare_cli.i18n import tr
+from compshare_cli.location import locate_instance, region_from_zone, supported_regions
 from compshare_cli.output import Renderer
 from compshare_cli.parsing import compact, disk_gib, encode_password, memory_mib, timestamp
 from compshare_cli.runtime import Runtime
@@ -30,6 +33,7 @@ INSTANCE_COLUMNS = (
     ("GPU", "COUNT"),
     ("CPU", "CPU"),
     ("MemoryDisplay", "MEMORY"),
+    ("Region", "REGION"),
     ("Zone", "ZONE"),
     ("ChargeType", "CHARGE"),
     ("InstancePrice", "PRICE/H"),
@@ -108,18 +112,90 @@ def _choose(
     default: int = 1,
 ) -> Choice:
     if not choices:
-        raise UsageError(f"{title}: 没有可选项")
-    typer.echo(f"\n{title}")
+        raise UsageError(f"{tr(title)}: {tr('No selectable options')}")
+    typer.echo(f"\n{tr(title)}")
     for index, choice in enumerate(choices, start=1):
         typer.echo(f"  {index}. {label(choice)}")
     if len(choices) == 1:
-        typer.echo("  Automatically selected the only option.")
+        typer.echo(f"  {tr('Automatically selected the only option.')}")
         return choices[0]
     while True:
-        selected = typer.prompt("Select", default=default, type=int)
+        selected = typer.prompt(tr("Select"), default=default, type=int)
         if 1 <= selected <= len(choices):
             return choices[selected - 1]
-        typer.echo(f"Please enter a number from 1 to {len(choices)}.", err=True)
+        typer.echo(tr("Please enter a number from 1 to {count}.", count=len(choices)), err=True)
+
+
+def _wait_enabled(state: Runtime, value: Optional[bool]) -> bool:
+    if value is not None:
+        return value
+    return not state.json_output and sys.stdout.isatty()
+
+
+def _wait_for_instance(
+    state: Runtime,
+    instance: str,
+    *,
+    region: str,
+    desired: Optional[set[str]] = None,
+    absent: bool = False,
+    timeout: int = 600,
+) -> Dict[str, Any]:
+    started = time.monotonic()
+    previous: Optional[str] = None
+    while True:
+        response = call(
+            state,
+            "DescribeCompShareInstance",
+            {"Region": region, "UHostIds": [instance]},
+        )
+        hosts = response.get("UHostSet", [])
+        if absent and not hosts:
+            return response
+        current = str(hosts[0].get("State", "Unknown")) if hosts else "NotFound"
+        if hosts and desired and current in desired:
+            return response
+        if (
+            hosts
+            and desired is None
+            and current
+            not in {
+                "Initializing",
+                "Pending",
+                "Starting",
+                "Stopping",
+                "Rebooting",
+                "Reinstalling",
+                "Resizing",
+            }
+        ):
+            return response
+        if current != previous and not state.json_output:
+            typer.echo(tr("Waiting for {instance}: {state}", instance=instance, state=current))
+            previous = current
+        if time.monotonic() - started >= timeout:
+            raise UsageError(
+                tr(
+                    "Timed out after {timeout}s while waiting for {instance}.",
+                    timeout=timeout,
+                    instance=instance,
+                )
+            )
+        time.sleep(3)
+
+
+def _project_id(state: Runtime, explicit: Optional[str]) -> str:
+    if explicit:
+        return explicit
+    response = call(state, "GetProjectList", {})
+    projects = response.get("ProjectSet", [])
+    selected = next((item for item in projects if item.get("IsDefault")), None)
+    selected = selected or (projects[0] if projects else None)
+    if not selected or not selected.get("ProjectId"):
+        raise UsageError(
+            tr("No project was returned by GetProjectList; pass --project-id explicitly.")
+        )
+    return str(selected["ProjectId"])
 
 
 def _create_location(
@@ -129,7 +205,7 @@ def _create_location(
     interactive: bool,
 ) -> Tuple[str, str]:
     selected_zone = zone or state.zone
-    selected_region = state.region
+    selected_region = region_from_zone(selected_zone)
     if not interactive or zone is not None:
         return selected_region, selected_zone
 
@@ -180,7 +256,7 @@ def _create_gpu(
     selected = _choose("GPU type", machines, label)
     value = selected.get("Name")
     if not value:
-        raise UsageError("机型接口返回了无名称的 GPU")
+        raise UsageError(tr("The machine type API returned an unnamed GPU."))
     return str(value)
 
 
@@ -207,7 +283,7 @@ def _create_images(
         "shared": "DescribeCompShareSharingImages",
     }
     if selected_source not in mapping:
-        raise UsageError("--image-source 必须是 platform、custom、community 或 shared")
+        raise UsageError(tr("--image-source must be platform, custom, community, or shared."))
     params: Dict[str, Any] = {"Region": region, "Limit": 100, "Offset": 0}
     if selected_source == "platform":
         params["Zone"] = zone
@@ -240,7 +316,7 @@ def _create_image(
     images = _create_images(state, region, zone, source)
     if len(images) > 1:
         query = typer.prompt(
-            "Filter images by name or ID (blank shows all)",
+            tr("Filter images by name or ID (blank shows all)"),
             default="",
             show_default=False,
         ).strip()
@@ -253,11 +329,11 @@ def _create_image(
                 or normalized in str(item.get("CompShareImageId", "")).casefold()
             ]
     if len(images) > 50:
-        raise UsageError("匹配到超过 50 个镜像，请输入更具体的筛选词")
+        raise UsageError(tr("More than 50 images matched; use a more specific filter."))
 
     def label(item: Dict[str, Any]) -> str:
         author = f" · {item.get('Author')}" if item.get("Author") else ""
-        return f"{item.get('Name') or 'Unnamed'}{author} · {item.get('CompShareImageId')}"
+        return f"{item.get('Name') or tr('Unnamed')}{author} · {item.get('CompShareImageId')}"
 
     selected = _choose("Image", images, label)
     return str(selected["CompShareImageId"])
@@ -288,17 +364,23 @@ def search(
     platform: str = typer.Option("Auto", "--platform", help="CPU platform for stock checks."),
     charge: Optional[str] = typer.Option(None, "--charge", help="Billing type for stock checks."),
     disk: str = typer.Option("100GiB", "--disk", help="Boot disk size for stock checks."),
-    disk_type: str = typer.Option("CLOUD_SSD", "--disk-type"),
+    disk_type: str = typer.Option(
+        "CLOUD_SSD", "--disk-type", help="Boot disk type used for stock checks."
+    ),
 ) -> None:
     """Search legal specifications and, with --image, real inventory."""
     if available and image is None:
-        raise UsageError("--available 需要同时指定 --image，库存必须按镜像和磁盘组合检查")
+        raise UsageError(
+            tr("--available requires --image because inventory depends on the image and disks.")
+        )
     state = runtime(ctx)
-    params = request(ctx)
+    selected_zone = zone or state.zone
+    selected_region = region_from_zone(selected_zone)
+    params = request(ctx, region_value=selected_region)
     params.update(
         compact(
             {
-                "Zone": zone or state.zone,
+                "Zone": selected_zone,
                 "MachineTypes": gpu,
                 "InstanceType": "spot" if spot else "uhost",
             }
@@ -314,10 +396,10 @@ def search(
             if machine.get("Name")
         }
         for machine_type in sorted(machine_types):
-            capacity_params = request(ctx)
+            capacity_params = request(ctx, region_value=selected_region)
             capacity_params.update(
                 {
-                    "Zone": zone or state.zone,
+                    "Zone": selected_zone,
                     "GpuType": machine_type,
                     "MachineType": "G",
                     "MinimalCpuPlatform": platform,
@@ -382,22 +464,29 @@ def families(ctx: typer.Context) -> None:
 def list_instances(
     ctx: typer.Context,
     ids: Optional[List[str]] = typer.Option(None, "--id", help="Instance ID; repeatable."),
-    zone: Optional[str] = typer.Option(None, "--zone"),
-    limit: int = typer.Option(20, min=1, max=100),
-    offset: int = typer.Option(0, min=0),
-    tag: Optional[str] = typer.Option(None),
-    vpc: Optional[str] = typer.Option(None, "--vpc"),
-    subnet: Optional[str] = typer.Option(None, "--subnet"),
+    region: Optional[str] = typer.Option(None, "--region", help="Filter by region."),
+    zone: Optional[str] = typer.Option(None, "--zone", help="Filter by availability zone."),
+    limit: int = typer.Option(20, min=1, max=100, help="Maximum number of results."),
+    offset: int = typer.Option(0, min=0, help="Number of results to skip."),
+    tag: Optional[str] = typer.Option(None, help="Filter by instance tag."),
+    vpc: Optional[str] = typer.Option(None, "--vpc", help="Filter by VPC ID."),
+    subnet: Optional[str] = typer.Option(None, "--subnet", help="Filter by subnet ID."),
     disk: Optional[str] = typer.Option(None, "--disk", help="Filter hosts compatible with a disk."),
     project_id: Optional[str] = typer.Option(
         None,
         "--project-id",
         help="Project ID for this request.",
     ),
-    without_gpu: bool = typer.Option(False, "--without-gpu"),
+    without_gpu: bool = typer.Option(False, "--without-gpu", help="List no-GPU instances."),
+    name: Optional[str] = typer.Option(None, "--name", help="Filter by instance name."),
+    status: Optional[str] = typer.Option(None, "--status", help="Filter by instance state."),
+    gpu: Optional[str] = typer.Option(None, "--gpu", help="Filter by GPU type."),
+    billing: Optional[str] = typer.Option(None, "--billing", help="Filter by billing type."),
 ) -> None:
     """List instances."""
-    params = request(ctx)
+    state = runtime(ctx)
+    selected_region = region_from_zone(zone) if zone else region
+    params = request(ctx, region_value=selected_region)
     params.update(
         compact(
             {
@@ -414,11 +503,38 @@ def list_instances(
             }
         )
     )
-    invoke(
-        runtime(ctx),
-        "DescribeCompShareInstance",
-        params,
-        row_builder=_instance_rows,
+    regions = [selected_region] if selected_region else supported_regions(state)
+    response: Dict[str, Any] = {"UHostSet": [], "RegionSet": regions}
+    for current_region in regions:
+        current = call(
+            state,
+            "DescribeCompShareInstance",
+            {**params, "Region": current_region},
+        )
+        for host in current.get("UHostSet", []):
+            item = dict(host)
+            item.setdefault("Region", current_region)
+            response["UHostSet"].append(item)
+    response["TotalCount"] = len(response["UHostSet"])
+    filters = {
+        "Name": name.casefold() if name else None,
+        "State": status.casefold() if status else None,
+        "GpuType": gpu.casefold() if gpu else None,
+        "ChargeType": billing.casefold() if billing else None,
+    }
+    filtered = []
+    for host in response.get("UHostSet", []):
+        if all(
+            expected is None or expected in str(host.get(field, "")).casefold()
+            for field, expected in filters.items()
+        ):
+            filtered.append(host)
+    result = dict(response)
+    result["UHostSet"] = filtered
+    result["FilteredCount"] = len(filtered)
+    Renderer(state.json_output).data(
+        result,
+        rows=_instance_rows(result),
         columns=INSTANCE_COLUMNS,
     )
 
@@ -426,9 +542,33 @@ def list_instances(
 @app.command("show")
 def show(ctx: typer.Context, instance: str = typer.Argument(..., help="Instance ID.")) -> None:
     """Show full instance details."""
-    params = request(ctx)
-    params["UHostIds"] = [instance]
-    invoke(runtime(ctx), "DescribeCompShareInstance", params)
+    state = runtime(ctx)
+    region, zone, host = locate_instance(state, instance)
+    response = {"UHostSet": [host], "ResolvedRegion": region, "ResolvedZone": zone}
+    Renderer(state.json_output).details(
+        "Instance details",
+        [
+            ("ID", host.get("UHostId")),
+            ("NAME", host.get("Name")),
+            ("STATE", host.get("State")),
+            ("GPU", f"{host.get('GpuType', '-')} × {host.get('GPU', '-')}"),
+            ("CPU", host.get("CPU")),
+            (
+                "MEMORY",
+                f"{host.get('Memory', 0) // 1024}GiB"
+                if isinstance(host.get("Memory"), int)
+                else host.get("Memory"),
+            ),
+            ("REGION", region),
+            ("ZONE", host.get("Zone")),
+            ("CHARGE", host.get("ChargeType")),
+            ("IMAGE", host.get("CompShareImageId") or host.get("ImageId")),
+            ("Password", host.get("Password")),
+            ("SSH", host.get("SshLoginCommand")),
+            ("DATA DISKS", host.get("DiskSet") or host.get("UDiskSet")),
+        ],
+        response=response,
+    )
 
 
 @app.command("create")
@@ -436,7 +576,7 @@ def create(
     ctx: typer.Context,
     gpu: Optional[str] = typer.Option(None, "--gpu", help="GPU type, for example 4090."),
     count: Optional[int] = typer.Option(None, "--count", min=1, help="GPU count."),
-    cpu: Optional[int] = typer.Option(None, "--cpu", min=1),
+    cpu: Optional[int] = typer.Option(None, "--cpu", min=1, help="CPU core count."),
     memory: Optional[str] = typer.Option(None, "--memory", help="Memory, for example 64GiB."),
     image: Optional[str] = typer.Option(None, "--image", help="CompShare image ID."),
     image_source: Optional[str] = typer.Option(
@@ -457,13 +597,24 @@ def create(
         help="Data disk as SIZE[:TYPE]; repeatable.",
     ),
     charge: Optional[str] = typer.Option(None, "--charge", help="Billing type."),
-    quantity: int = typer.Option(1, min=1),
-    name: Optional[str] = typer.Option(None),
-    platform: str = typer.Option("Auto", "--platform"),
-    remark: Optional[str] = typer.Option(None),
-    firewall: Optional[str] = typer.Option(None, "--firewall"),
-    max_count: int = typer.Option(1, "--max-count", min=1),
-    us3: bool = typer.Option(False, "--us3"),
+    quantity: int = typer.Option(1, min=1, help="Billing duration for prepaid modes."),
+    name: Optional[str] = typer.Option(None, help="Instance name."),
+    platform: str = typer.Option("Auto", "--platform", help="Minimum CPU platform."),
+    remark: Optional[str] = typer.Option(None, help="Instance remark."),
+    firewall: Optional[str] = typer.Option(None, "--firewall", help="Security group ID."),
+    max_count: int = typer.Option(1, "--max-count", min=1, help="Number of instances."),
+    us3: bool = typer.Option(False, "--us3", help="Attach US3 during container creation."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate and show the request without changing resources.",
+    ),
+    wait: Optional[bool] = typer.Option(
+        None,
+        "--wait/--no-wait",
+        help="Wait for the operation to reach a stable state.",
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Create instances interactively, or use explicit options for automation."""
@@ -471,7 +622,10 @@ def create(
     interactive = any(value is None for value in (gpu, count, cpu, memory, image))
     if interactive and state.json_output:
         raise UsageError(
-            "--json 模式不会启动交互向导，请同时指定 --gpu、--count、--cpu、--memory 和 --image"
+            tr(
+                "JSON mode cannot start the interactive wizard; pass --gpu, --count, --cpu, "
+                "--memory, and --image."
+            )
         )
 
     region, selected_zone = _create_location(state, zone, interactive=interactive)
@@ -488,11 +642,11 @@ def create(
     resolved_boot_type = boot_type
     if interactive:
         resolved_boot_disk = resolved_boot_disk or typer.prompt(
-            "Boot disk size",
+            tr("Boot disk size"),
             default="100GiB",
         )
         resolved_boot_type = resolved_boot_type or typer.prompt(
-            "Boot disk type",
+            tr("Boot disk type"),
             default="CLOUD_SSD",
         )
     else:
@@ -524,7 +678,10 @@ def create(
     ]
     if not matching:
         Renderer(state.json_output).error(
-            "所选 GPU、CPU、内存、镜像、计费方式和磁盘组合当前无可用资源",
+            tr(
+                "No inventory is available for the selected GPU, CPU, memory, image, billing, "
+                "and disk combination."
+            ),
             details={"capacity": capacity},
         )
         raise typer.Exit(2)
@@ -569,14 +726,6 @@ def create(
         numbers = [value for value in values if isinstance(value, (int, float))]
         amount = sum(numbers) if numbers else None
     price_text = "unknown" if amount is None else str(round(amount * max_count, 4))
-    confirm(
-        f"Create {max_count} instance(s) in {selected_zone}: {resolved_gpu}×{resolved_count}, "
-        f"{resolved_cpu} CPU, {resolved_memory_gib}GiB memory, image={resolved_image}, "
-        f"disk={resolved_boot_disk}:{resolved_boot_type}, charge={resolved_charge}, "
-        f"API quote={price_text}?",
-        yes,
-    )
-
     create_params = dict(common)
     create_params.update(
         compact(
@@ -599,25 +748,84 @@ def create(
             }
         )
     )
+    selection = {
+        "Region": region,
+        "Zone": selected_zone,
+        "GpuType": resolved_gpu,
+        "GPU": resolved_count,
+        "CPU": resolved_cpu,
+        "Memory": memory_mb,
+        "CompShareImageId": resolved_image,
+        "Disks": disks,
+        "ChargeType": resolved_charge,
+        "MaxCount": max_count,
+    }
+    plan = {
+        "dry_run": dry_run,
+        "selection": selection,
+        "capacity": selected_spec,
+        "price": price,
+        "request": create_params,
+    }
+    if dry_run:
+        Renderer(state.json_output).details(
+            "Create plan",
+            [
+                ("ZONE", selected_zone),
+                ("GPU", f"{resolved_gpu} × {resolved_count}"),
+                ("CPU", resolved_cpu),
+                ("MEMORY", f"{resolved_memory_gib}GiB"),
+                ("IMAGE", resolved_image),
+                ("SYSTEM DISK", f"{resolved_boot_disk}:{resolved_boot_type}"),
+                ("CHARGE", resolved_charge),
+                ("COUNT", max_count),
+                ("PRICE", price_text),
+            ],
+            response=plan,
+        )
+        return
+    confirm_details(
+        state,
+        "Create plan",
+        [
+            ("ZONE", selected_zone),
+            ("GPU", f"{resolved_gpu} × {resolved_count}"),
+            ("CPU", resolved_cpu),
+            ("MEMORY", f"{resolved_memory_gib}GiB"),
+            ("IMAGE", resolved_image),
+            ("SYSTEM DISK", f"{resolved_boot_disk}:{resolved_boot_type}"),
+            ("CHARGE", resolved_charge),
+            ("COUNT", max_count),
+            ("PRICE", price_text),
+        ],
+        "Confirm this operation?",
+        yes,
+    )
     created = call(state, "CreateCompShareInstance", create_params)
     result = {
-        "selection": {
-            "Region": region,
-            "Zone": selected_zone,
-            "GpuType": resolved_gpu,
-            "GPU": resolved_count,
-            "CPU": resolved_cpu,
-            "Memory": memory_mb,
-            "CompShareImageId": resolved_image,
-            "Disks": disks,
-            "ChargeType": resolved_charge,
-            "MaxCount": max_count,
-        },
+        "selection": selection,
         "capacity": selected_spec,
         "price": price,
         "instance": created,
     }
-    Renderer(state.json_output).data(result)
+    ids = created.get("UHostIds") or created.get("UHostId") or []
+    if isinstance(ids, str):
+        ids = [ids]
+    if _wait_enabled(state, wait):
+        result["final"] = [
+            _wait_for_instance(state, item, region=region, timeout=timeout) for item in ids
+        ]
+    Renderer(state.json_output).details(
+        "Operation completed",
+        [
+            ("INSTANCE", ids),
+            ("Password", created.get("Password")),
+            ("ZONE", selected_zone),
+            ("GPU", f"{resolved_gpu} × {resolved_count}"),
+            ("PRICE", price_text),
+        ],
+        response=result,
+    )
 
 
 def _lifecycle(
@@ -628,62 +836,150 @@ def _lifecycle(
     *,
     yes: bool,
     extra: Optional[Dict[str, Any]] = None,
+    wait: Optional[bool] = None,
+    timeout: int = 600,
+    desired: Optional[set[str]] = None,
+    absent: bool = False,
 ) -> None:
-    confirm(message, yes)
-    params = request(ctx, zone=True)
+    state = runtime(ctx)
+    region, zone, _ = locate_instance(state, instance)
+    confirm_details(
+        state,
+        "Operation plan",
+        [("INSTANCE", instance), ("ACTION", tr(message.rstrip("?")))],
+        "Confirm this operation?",
+        yes,
+    )
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params["UHostId"] = instance
     params.update(extra or {})
-    invoke(runtime(ctx), action, params, success=message.rstrip("?"))
+    submitted = call(state, action, params)
+    result: Dict[str, Any] = {"operation": submitted}
+    if _wait_enabled(state, wait):
+        result["final"] = _wait_for_instance(
+            state,
+            instance,
+            region=region,
+            desired=desired,
+            absent=absent,
+            timeout=timeout,
+        )
+    Renderer(state.json_output).success(tr("Operation completed"), result)
 
 
 @app.command("start", help="Start an instance.")
 def start(
     ctx: typer.Context,
     instance: str,
-    without_gpu: Optional[str] = typer.Option(None, "--without-gpu", help="A or B."),
+    without_gpu: Optional[str] = typer.Option(
+        None, "--without-gpu", help="No-GPU specification: A or B."
+    ),
+    wait: Optional[bool] = typer.Option(
+        None, "--wait/--no-wait", help="Wait for the operation to reach a stable state."
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
 ) -> None:
-    params = request(ctx, zone=True)
+    state = runtime(ctx)
+    region, zone, _ = locate_instance(state, instance)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params.update(compact({"UHostId": instance, "WithoutGpuSpec": without_gpu}))
-    invoke(runtime(ctx), "StartCompShareInstance", params, success=f"Started {instance}")
+    submitted = call(state, "StartCompShareInstance", params)
+    result: Dict[str, Any] = {"operation": submitted}
+    if _wait_enabled(state, wait):
+        result["final"] = _wait_for_instance(
+            state,
+            instance,
+            region=region,
+            desired={"Running"},
+            timeout=timeout,
+        )
+    Renderer(state.json_output).success(tr("Operation completed"), result)
 
 
 @app.command("stop", help="Stop an instance.")
-def stop(ctx: typer.Context, instance: str, yes: bool = typer.Option(False, "--yes", "-y")) -> None:
-    _lifecycle(ctx, "StopCompShareInstance", instance, f"Stop instance {instance}?", yes=yes)
+def stop(
+    ctx: typer.Context,
+    instance: str,
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    wait: Optional[bool] = typer.Option(
+        None, "--wait/--no-wait", help="Wait for the operation to reach a stable state."
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
+) -> None:
+    _lifecycle(
+        ctx,
+        "StopCompShareInstance",
+        instance,
+        "Stop instance",
+        yes=yes,
+        wait=wait,
+        timeout=timeout,
+        desired={"Stopped"},
+    )
 
 
 @app.command("reboot", help="Reboot an instance.")
 def reboot(
     ctx: typer.Context,
     instance: str,
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    wait: Optional[bool] = typer.Option(
+        None, "--wait/--no-wait", help="Wait for the operation to reach a stable state."
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
 ) -> None:
-    _lifecycle(ctx, "RebootCompShareInstance", instance, f"Reboot instance {instance}?", yes=yes)
+    _lifecycle(
+        ctx,
+        "RebootCompShareInstance",
+        instance,
+        "Reboot instance",
+        yes=yes,
+        wait=wait,
+        timeout=timeout,
+        desired={"Running"},
+    )
 
 
 @app.command("delete", help="Permanently delete an instance.")
 def delete(
     ctx: typer.Context,
     instance: str,
-    release_disk: bool = typer.Option(False, "--release-disk"),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    release_disk: bool = typer.Option(
+        False, "--release-disk", help="Delete attached data disks with the instance."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    wait: Optional[bool] = typer.Option(
+        None, "--wait/--no-wait", help="Wait for the operation to reach a stable state."
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
 ) -> None:
-    suffix = " and its data disks" if release_disk else ""
     _lifecycle(
         ctx,
         "TerminateCompShareInstance",
         instance,
-        f"Permanently delete instance {instance}{suffix}?",
+        "Permanently delete instance and attached data disks"
+        if release_disk
+        else "Permanently delete instance",
         yes=yes,
         extra={"ReleaseUDisk": release_disk},
+        wait=wait,
+        timeout=timeout,
+        absent=True,
     )
 
 
 @app.command("rename", help="Rename an instance.")
 def rename(ctx: typer.Context, instance: str, name: str) -> None:
-    params = request(ctx)
-    params.update({"Zone": runtime(ctx).zone, "UHostId": instance, "Name": name})
-    invoke(runtime(ctx), "ModifyCompShareInstanceName", params, success=f"Renamed {instance}")
+    state = runtime(ctx)
+    region, zone, _ = locate_instance(state, instance)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
+    params.update({"UHostId": instance, "Name": name})
+    invoke(
+        state,
+        "ModifyCompShareInstanceName",
+        params,
+        success=tr("Renamed {instance}", instance=instance),
+    )
 
 
 @app.command("password")
@@ -691,15 +987,15 @@ def password(
     ctx: typer.Context,
     instance: str,
     value: Optional[str] = typer.Option(None, "--password", hidden=True),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Reset an instance password."""
-    secret = value or typer.prompt("New password", hide_input=True, confirmation_prompt=True)
+    secret = value or typer.prompt(tr("New password"), hide_input=True, confirmation_prompt=True)
     _lifecycle(
         ctx,
         "ResetCompShareInstancePassword",
         instance,
-        f"Reset password for instance {instance}?",
+        "Reset instance password",
         yes=yes,
         extra={"Password": encode_password(secret)},
     )
@@ -709,10 +1005,14 @@ def password(
 def reinstall(
     ctx: typer.Context,
     instance: str,
-    image: str = typer.Option(..., "--image"),
+    image: str = typer.Option(..., "--image", help="Replacement image ID."),
     password: Optional[str] = typer.Option(None, "--password", hidden=True),
-    coupon: Optional[str] = typer.Option(None, "--coupon"),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    coupon: Optional[str] = typer.Option(None, "--coupon", help="Coupon ID."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    wait: Optional[bool] = typer.Option(
+        None, "--wait/--no-wait", help="Wait for the operation to reach a stable state."
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
 ) -> None:
     extra = compact(
         {
@@ -725,9 +1025,11 @@ def reinstall(
         ctx,
         "ReinstallCompShareInstance",
         instance,
-        f"Reinstall instance {instance} from image {image}? All system disk data will be lost.",
+        "Reinstall instance; all system disk data will be lost",
         yes=yes,
         extra=extra,
+        wait=wait,
+        timeout=timeout,
     )
 
 
@@ -735,32 +1037,45 @@ def reinstall(
 def resize(
     ctx: typer.Context,
     instance: str,
-    cpu: Optional[int] = typer.Option(None, min=1),
-    memory: Optional[str] = typer.Option(None),
-    gpu: Optional[int] = typer.Option(None, min=0),
-    without_gpu: Optional[str] = typer.Option(None, "--without-gpu"),
-    disk: Optional[str] = typer.Option(None, "--disk"),
-    disk_size: Optional[str] = typer.Option(None, "--disk-size"),
-    coupon: Optional[str] = typer.Option(None, "--coupon"),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    cpu: Optional[int] = typer.Option(None, min=1, help="Target CPU core count."),
+    memory: Optional[str] = typer.Option(None, help="Target memory, for example 64GiB."),
+    gpu: Optional[int] = typer.Option(None, min=0, help="Target GPU count."),
+    without_gpu: Optional[str] = typer.Option(
+        None, "--without-gpu", help="Target no-GPU specification: A or B."
+    ),
+    disk: Optional[str] = typer.Option(None, "--disk", help="Disk ID to resize."),
+    disk_size: Optional[str] = typer.Option(
+        None, "--disk-size", help="Target disk size, for example 200GiB."
+    ),
+    coupon: Optional[str] = typer.Option(None, "--coupon", help="Coupon ID."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate and show the request without changing resources.",
+    ),
+    wait: Optional[bool] = typer.Option(
+        None, "--wait/--no-wait", help="Wait for the operation to reach a stable state."
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     compute_values = (cpu, memory, gpu)
     compute_resize = any(value is not None for value in compute_values) or without_gpu is not None
     disk_resize = disk is not None or disk_size is not None
     if not compute_resize and not disk_resize:
-        raise UsageError("至少指定 CPU、memory、GPU、without-gpu 或 disk-size 中的一项")
+        raise UsageError(tr("Specify a compute target or both --disk and --disk-size."))
     if (disk is None) != (disk_size is None):
-        raise UsageError("--disk 和 --disk-size 必须同时使用")
+        raise UsageError(tr("--disk and --disk-size must be used together."))
     if compute_resize and disk_resize:
-        raise UsageError("计算规格调整和磁盘扩容不能在同一次请求中进行")
+        raise UsageError(tr("Compute resizing and disk resizing must be separate operations."))
     if without_gpu is not None and any(value is not None for value in compute_values):
-        raise UsageError("--without-gpu 不能与 --cpu、--memory 或 --gpu 同时使用")
+        raise UsageError(tr("--without-gpu cannot be combined with --cpu, --memory, or --gpu."))
     if (
         without_gpu is None
         and compute_resize
         and not all(value is not None for value in compute_values)
     ):
-        raise UsageError("调整计算规格时必须同时指定 --cpu、--memory 和 --gpu")
+        raise UsageError(tr("Compute resizing requires --cpu, --memory, and --gpu together."))
     params = compact(
         {
             "Cpu": cpu,
@@ -772,35 +1087,60 @@ def resize(
             "CouponId": coupon,
         }
     )
+    if dry_run:
+        quote: Dict[str, Any] = {}
+        if compute_resize and without_gpu is None:
+            state = runtime(ctx)
+            region, zone, _ = locate_instance(state, instance)
+            quote_params = request(
+                ctx,
+                zone=True,
+                region_value=region,
+                zone_value=zone,
+            )
+            quote_params.update(
+                {"UHostId": instance, "CPU": cpu, "Memory": memory_mib(memory or ""), "GPU": gpu}
+            )
+            quote = call(runtime(ctx), "GetCompShareInstanceUpgradePrice", quote_params)
+        Renderer(runtime(ctx).json_output).details(
+            "Operation plan",
+            [("INSTANCE", instance), ("ACTION", "Resize"), ("REQUEST", params), ("PRICE", quote)],
+            response={"dry_run": True, "instance": instance, "request": params, "price": quote},
+        )
+        return
     _lifecycle(
         ctx,
         "ResizeCompShareInstance",
         instance,
-        f"Resize instance {instance}?",
+        "Resize instance",
         yes=yes,
         extra=params,
+        wait=wait,
+        timeout=timeout,
     )
 
 
 @app.command("price", help="Query a new instance price.")
 def price(
     ctx: typer.Context,
-    gpu: str = typer.Option(..., "--gpu"),
-    count: int = typer.Option(1, "--count", min=1),
-    cpu: int = typer.Option(..., min=1),
-    memory: str = typer.Option(...),
-    charge: Optional[str] = typer.Option(None),
-    disk: str = typer.Option("100GiB"),
-    disk_type: str = typer.Option("CLOUD_SSD", "--disk-type"),
+    gpu: str = typer.Option(..., "--gpu", help="GPU type."),
+    count: int = typer.Option(1, "--count", min=1, help="GPU count."),
+    cpu: int = typer.Option(..., min=1, help="CPU core count."),
+    memory: str = typer.Option(..., help="Memory, for example 64GiB."),
+    charge: Optional[str] = typer.Option(None, help="Billing type."),
+    disk: str = typer.Option("100GiB", help="Boot disk size."),
+    disk_type: str = typer.Option("CLOUD_SSD", "--disk-type", help="Boot disk type."),
     volume: Optional[List[str]] = typer.Option(
         None,
         "--volume",
         help="Shared storage as SIZE[:TYPE]; repeatable.",
     ),
-    image: Optional[str] = typer.Option(None),
-    quantity: int = typer.Option(1, min=1),
+    image: Optional[str] = typer.Option(None, help="Image ID for image pricing."),
+    quantity: int = typer.Option(1, min=1, help="Billing duration for prepaid modes."),
+    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
 ) -> None:
-    params = request(ctx, zone=True)
+    selected_zone = zone or runtime(ctx).zone
+    params = request(ctx, zone=True, zone_value=selected_zone)
     params.update(
         compact(
             {
@@ -831,17 +1171,20 @@ def price(
     )
 
 
-@app.command("upgrade-price", help="Query the price of an instance upgrade.")
+@app.command("upgrade-price", help="Query the price of an instance upgrade.", hidden=True)
+@app.command("resize-price", help="Query the price of an instance upgrade.")
 def upgrade_price(
     ctx: typer.Context,
     instance: str,
-    cpu: Optional[int] = typer.Option(None),
-    memory: Optional[str] = typer.Option(None),
-    gpu: Optional[int] = typer.Option(None),
+    cpu: Optional[int] = typer.Option(None, help="Target CPU core count."),
+    memory: Optional[str] = typer.Option(None, help="Target memory, for example 64GiB."),
+    gpu: Optional[int] = typer.Option(None, help="Target GPU count."),
 ) -> None:
     if cpu is None and memory is None and gpu is None:
-        raise UsageError("至少指定 --cpu、--memory 或 --gpu 中的一项")
-    params = request(ctx, zone=True)
+        raise UsageError(tr("Specify at least one of --cpu, --memory, or --gpu."))
+    state = runtime(ctx)
+    region, zone, _ = locate_instance(state, instance)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params.update(
         compact(
             {
@@ -852,19 +1195,21 @@ def upgrade_price(
             }
         )
     )
-    invoke(runtime(ctx), "GetCompShareInstanceUpgradePrice", params)
+    invoke(state, "GetCompShareInstanceUpgradePrice", params)
 
 
 @app.command("billing", help="Query current instance pricing.")
 def billing(
     ctx: typer.Context,
-    gpu: str = typer.Option(..., "--gpu"),
-    count: int = typer.Option(1, "--count"),
-    cpu: int = typer.Option(...),
-    memory: str = typer.Option(...),
-    charge: Optional[str] = typer.Option(None),
+    gpu: str = typer.Option(..., "--gpu", help="GPU type."),
+    count: int = typer.Option(1, "--count", help="GPU count."),
+    cpu: int = typer.Option(..., help="CPU core count."),
+    memory: str = typer.Option(..., help="Memory, for example 64GiB."),
+    charge: Optional[str] = typer.Option(None, help="Billing type."),
+    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
 ) -> None:
-    params = request(ctx, zone=True)
+    selected_zone = zone or runtime(ctx).zone
+    params = request(ctx, zone=True, zone_value=selected_zone)
     params.update(
         compact(
             {
@@ -893,13 +1238,22 @@ def billing(
 
 @app.command("refund", help="Query instance refund amounts.")
 def refund(ctx: typer.Context, instances: List[str] = typer.Argument(...)) -> None:
-    params = request(ctx, zone=True)
-    params["UHostIds"] = instances
-    invoke(
-        runtime(ctx),
-        "GetCompShareRefundPrice",
-        params,
-        list_key="RefundPriceSet",
+    state = runtime(ctx)
+    groups: Dict[Tuple[str, str], List[str]] = {}
+    for instance in instances:
+        region, zone, _ = locate_instance(state, instance)
+        groups.setdefault((region, zone), []).append(instance)
+    response: Dict[str, Any] = {"RefundPriceSet": []}
+    for (region, zone), ids in groups.items():
+        current = call(
+            state,
+            "GetCompShareRefundPrice",
+            {"Region": region, "Zone": zone, "UHostIds": ids},
+        )
+        response["RefundPriceSet"].extend(current.get("RefundPriceSet", []))
+    Renderer(state.json_output).data(
+        response,
+        rows=response["RefundPriceSet"],
         columns=(
             ("UHostId", "INSTANCE"),
             ("Code", "CODE"),
@@ -909,14 +1263,21 @@ def refund(ctx: typer.Context, instances: List[str] = typer.Argument(...)) -> No
     )
 
 
-@app.command("monitor", help="Get instance monitoring data.")
+@app.command(
+    "monitor",
+    help="Get instance monitoring data (currently unavailable in production).",
+)
 def monitor(
     ctx: typer.Context,
     instances: Optional[List[str]] = typer.Argument(None),
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
 ) -> None:
-    params = request(ctx)
+    state = runtime(ctx)
+    if not region and instances:
+        region, _, _ = locate_instance(state, instances[0])
+    params = request(ctx, region_value=region)
     params.update(compact({"UHostIds": instances}))
-    invoke(runtime(ctx), "GetCompShareInstanceMonitor", params)
+    invoke(state, "GetCompShareInstanceMonitor", params)
 
 
 @app.command("charge", help="Change an instance billing type.")
@@ -924,30 +1285,50 @@ def charge(
     ctx: typer.Context,
     instance: str,
     destination: str = typer.Option(..., "--to", help="Month, Day, Dynamic or Postpay."),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate and show the request without changing resources.",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
+    if dry_run:
+        Renderer(runtime(ctx).json_output).details(
+            "Operation plan",
+            [("INSTANCE", instance), ("CHARGE", destination)],
+            response={"dry_run": True, "instance": instance, "destination": destination},
+        )
+        return
     _lifecycle(
         ctx,
         "SwitchChargeType",
         instance,
-        f"Change billing for {instance} to {destination}?",
+        "Change instance billing type",
         yes=yes,
         extra={"DestChargeType": destination},
     )
 
 
 @app.command("network", help="Check network accelerator status.")
-def network(ctx: typer.Context) -> None:
-    invoke(runtime(ctx), "CheckCompShareNetOptimizer", request(ctx))
+def network(
+    ctx: typer.Context,
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+) -> None:
+    invoke(
+        runtime(ctx),
+        "CheckCompShareNetOptimizer",
+        request(ctx, region_value=region),
+    )
 
 
 @app.command("models", help="List models in the model repository.")
 def models(
     ctx: typer.Context,
-    name: Optional[str] = typer.Option(None),
-    tags: Optional[str] = typer.Option(None),
+    name: Optional[str] = typer.Option(None, help="Filter by model name."),
+    tags: Optional[str] = typer.Option(None, help="Filter by model tags."),
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
 ) -> None:
-    params = request(ctx)
+    params = request(ctx, region_value=region)
     params.update(compact({"name": name, "tags": tags}))
     invoke(
         runtime(ctx),
@@ -965,11 +1346,14 @@ def models(
 
 
 @ports_app.command("list", help="List supported software ports.")
-def list_ports(ctx: typer.Context) -> None:
+def list_ports(
+    ctx: typer.Context,
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+) -> None:
     invoke(
         runtime(ctx),
         "DescribeCompShareSoftwarePort",
-        request(ctx),
+        request(ctx, region_value=region),
         list_key="SoftwarePort",
         columns=(("Software", "SOFTWARE"), ("Port", "PORT")),
     )
@@ -979,62 +1363,99 @@ def list_ports(ctx: typer.Context) -> None:
 def update_ports(
     ctx: typer.Context,
     instance: str,
-    http: Optional[List[int]] = typer.Option(None, "--http"),
-    tcp: Optional[List[int]] = typer.Option(None, "--tcp"),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    http: Optional[List[int]] = typer.Option(
+        None, "--http", help="Complete HTTP port list; repeatable."
+    ),
+    tcp: Optional[List[int]] = typer.Option(
+        None, "--tcp", help="Complete TCP port list; repeatable."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     if http is None and tcp is None:
-        raise UsageError("至少指定一个 --http 或 --tcp；传空列表表示清除需使用 API JSON")
-    confirm(f"Replace port mappings for {instance}?", yes)
-    params = request(ctx, zone=True)
+        raise UsageError(tr("Specify at least one --http or --tcp port."))
+    confirm(tr("Replace port mappings for {instance}?", instance=instance), yes)
+    state = runtime(ctx)
+    region, zone, _ = locate_instance(state, instance)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params.update(compact({"UHostId": instance, "HttpPorts": http, "TcpPorts": tcp}))
-    invoke(runtime(ctx), "UpdateCompShareInstancePorts", params, success="Updated port mappings")
+    invoke(
+        state,
+        "UpdateCompShareInstancePorts",
+        params,
+        success=tr("Updated port mappings"),
+    )
 
 
 @schedule_app.command("set", help="Schedule an instance shutdown.")
 def set_schedule(
     ctx: typer.Context,
     instance: str,
-    at: str = typer.Option(..., "--at", help="Unix timestamp or ISO 8601 time."),
-    project_id: str = typer.Option(..., "--project-id", help="Project ID for this request."),
+    at: str = typer.Option(..., "--at", help="Unix timestamp, ISO 8601, or relative time."),
+    project_id: Optional[str] = typer.Option(
+        None, "--project-id", help="Override the automatically detected project ID."
+    ),
 ) -> None:
     stop_time = timestamp(at)
     if stop_time < int(time.time()) + 300:
-        raise UsageError("定时关机时间必须至少晚于当前时间 5 分钟")
-    params = request(ctx, zone=True, project_id=project_id)
+        raise UsageError(tr("Scheduled shutdown must be at least five minutes from now."))
+    state = runtime(ctx)
+    region, zone, _ = locate_instance(state, instance)
+    params = request(
+        ctx,
+        zone=True,
+        project_id=_project_id(state, project_id),
+        region_value=region,
+        zone_value=zone,
+    )
     params.update({"UHostId": instance, "SchedulerStopTime": stop_time})
-    invoke(runtime(ctx), "UpdateCompShareStopScheduler", params, success="Scheduled shutdown")
+    invoke(state, "UpdateCompShareStopScheduler", params, success=tr("Scheduled shutdown"))
 
 
 @schedule_app.command("cancel", help="Cancel an instance scheduled shutdown.")
 def cancel_schedule(
     ctx: typer.Context,
     instance: str,
-    project_id: str = typer.Option(..., "--project-id", help="Project ID for this request."),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    project_id: Optional[str] = typer.Option(
+        None, "--project-id", help="Override the automatically detected project ID."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    confirm(f"Cancel scheduled shutdown for {instance}?", yes)
-    params = request(ctx, project_id=project_id)
+    confirm(tr("Cancel scheduled shutdown for {instance}?", instance=instance), yes)
+    state = runtime(ctx)
+    region, _, _ = locate_instance(state, instance)
+    params = request(
+        ctx,
+        project_id=_project_id(state, project_id),
+        region_value=region,
+    )
     params["UHostId"] = instance
-    invoke(runtime(ctx), "DeleteCompShareStopScheduler", params, success="Cancelled shutdown")
+    invoke(state, "DeleteCompShareStopScheduler", params, success=tr("Cancelled shutdown"))
 
 
 @software_app.command("list", help="List supported instance software.")
-def list_software(ctx: typer.Context) -> None:
+def list_software(
+    ctx: typer.Context,
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+) -> None:
     invoke(
         runtime(ctx),
         "DescribeCompShareSoftwarePort",
-        request(ctx),
+        request(ctx, region_value=region),
         list_key="SoftwarePort",
         columns=(("Software", "SOFTWARE"), ("Port", "PORT")),
     )
 
 
-@software_app.command("url", help="Get an instance software access URL.")
+@software_app.command(
+    "url",
+    help="Get an instance software access URL (currently unavailable in production).",
+)
 def software_url(ctx: typer.Context, instance: str, software: str) -> None:
-    params = request(ctx, zone=True)
+    state = runtime(ctx)
+    region, zone, _ = locate_instance(state, instance)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params.update({"UHostId": instance, "Software": software})
-    invoke(runtime(ctx), "GetSoftwareURL", params)
+    invoke(state, "GetSoftwareURL", params)
 
 
 @app.command("ssh", help="Open or print an instance SSH command.")
@@ -1043,26 +1464,30 @@ def ssh(
     instance: str,
     print_only: bool = typer.Option(False, "--print", help="Print instead of executing SSH."),
 ) -> None:
-    params = request(ctx)
-    params["UHostIds"] = [instance]
-    response = call(runtime(ctx), "DescribeCompShareInstance", params)
-    hosts = response.get("UHostSet", [])
-    host = hosts[0] if hosts else {}
+    state = runtime(ctx)
+    region, zone, host = locate_instance(state, instance)
     command = host.get("SshLoginCommand")
     password = host.get("Password")
     if not command:
-        raise UsageError(f"实例 {instance} 没有可用的 SSH 登录命令")
-    if print_only or runtime(ctx).json_output:
-        Renderer(runtime(ctx).json_output).data(
-            {"instance": instance, "command": command, "password": password}
+        raise UsageError(tr("Instance {instance} has no SSH login command.", instance=instance))
+    if print_only or state.json_output:
+        Renderer(state.json_output).data(
+            {
+                "instance": instance,
+                "command": command,
+                "password": password,
+            }
         )
         return
     if password:
         typer.echo(f"Password: {password}")
     else:
         typer.echo(
-            f"Password was not returned by the API. Run `compshare instance password {instance}` "
-            "to set one."
+            tr(
+                "The API did not return a password. Run `compshare instance password {instance}` "
+                "to set one.",
+                instance=instance,
+            )
         )
     argv = shlex.split(command)
     raise typer.Exit(subprocess.call(argv))

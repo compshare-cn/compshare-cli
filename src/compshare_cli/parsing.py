@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import base64
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from compshare_cli.errors import UsageError
+from compshare_cli.i18n import tr
 
 _SIZE_RE = re.compile(r"^\s*(\d+)\s*(mib|mb|gib|gb|m|g)?\s*$", re.IGNORECASE)
 
@@ -14,27 +16,27 @@ _SIZE_RE = re.compile(r"^\s*(\d+)\s*(mib|mb|gib|gb|m|g)?\s*$", re.IGNORECASE)
 def memory_mib(value: str) -> int:
     match = _SIZE_RE.match(value)
     if not match:
-        raise UsageError(f"无效的内存大小: {value}，示例：64GiB")
+        raise UsageError(tr("Invalid memory size: {value}. Example: 64GiB", value=value))
     amount = int(match.group(1))
     unit = (match.group(2) or "gib").lower()
     result = amount if unit in {"mib", "mb", "m"} else amount * 1024
     if result <= 0 or result % 1024 != 0:
-        raise UsageError("内存必须大于 0，且换算后为 1024 MiB 的整数倍")
+        raise UsageError(tr("Memory must be positive and resolve to whole GiB."))
     return result
 
 
 def disk_gib(value: str) -> int:
     match = _SIZE_RE.match(value)
     if not match:
-        raise UsageError(f"无效的磁盘大小: {value}，示例：100GiB")
+        raise UsageError(tr("Invalid disk size: {value}. Example: 100GiB", value=value))
     amount = int(match.group(1))
     unit = (match.group(2) or "gib").lower()
     if unit in {"mib", "mb", "m"}:
         if amount % 1024:
-            raise UsageError("磁盘 MiB 数必须能换算成整数 GiB")
+            raise UsageError(tr("Disk MiB must resolve to whole GiB."))
         amount //= 1024
     if amount <= 0:
-        raise UsageError("磁盘大小必须大于 0")
+        raise UsageError(tr("Disk size must be positive."))
     return amount
 
 
@@ -43,13 +45,20 @@ def encode_password(value: str) -> str:
 
 
 def timestamp(value: str) -> int:
+    relative = re.fullmatch(r"\s*(\d+)\s*([mhd])\s*", value, re.IGNORECASE)
+    if relative:
+        amount = int(relative.group(1))
+        seconds = {"m": 60, "h": 3600, "d": 86400}[relative.group(2).lower()]
+        return int(time.time()) + amount * seconds
     if value.isdigit():
         return int(value)
     normalized = value.replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError as exc:
-        raise UsageError("时间必须是 Unix 时间戳或 ISO 8601 格式") from exc
+        raise UsageError(
+            tr("Time must be a Unix timestamp, ISO 8601 value, or relative value like 30m or 2h.")
+        ) from exc
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return int(parsed.timestamp())
@@ -72,7 +81,7 @@ def read_text(path: Optional[Path]) -> Optional[str]:
     try:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise UsageError(f"无法读取文件 {path}: {exc}") from exc
+        raise UsageError(tr("Unable to read file {path}: {error}", path=path, error=exc)) from exc
 
 
 def read_base64(path: Optional[Path]) -> Optional[str]:
@@ -81,4 +90,4 @@ def read_base64(path: Optional[Path]) -> Optional[str]:
     try:
         return base64.b64encode(path.read_bytes()).decode("ascii")
     except OSError as exc:
-        raise UsageError(f"无法读取文件 {path}: {exc}") from exc
+        raise UsageError(tr("Unable to read file {path}: {error}", path=path, error=exc)) from exc

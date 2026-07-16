@@ -104,6 +104,111 @@ def call(runtime: Runtime, action: str, params: Dict[str, Any]) -> Dict[str, Any
         raise typer.Exit(1) from error
 
 
+def call_captured(
+    runtime: Runtime,
+    action: str,
+    params: Dict[str, Any],
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Invoke without rendering and return a structured error for batch operations."""
+    try:
+        return CompShareSDK(runtime.profile, runtime.region).invoke(action, params), None
+    except CLIError as error:
+        return None, {"message": str(error), "action": action}
+    except ucloud_exc.RetCodeException as error:
+        hint = error_hint(error.action or action, error.code)
+        return None, {
+            "message": _with_hint(error.message or str(error), hint),
+            "action": error.action or action,
+            "ret_code": error.code,
+            "request_uuid": error.request_uuid,
+            "hint": hint,
+        }
+    except ucloud_exc.UCloudException as error:
+        return None, {"message": str(error), "action": action}
+    except Exception as error:  # SDK transport exceptions are not all UCloudException subclasses.
+        return None, {"message": str(error), "action": action}
+
+
+def collect_pages(
+    runtime: Runtime,
+    action: str,
+    params: Dict[str, Any],
+    list_key: str,
+    *,
+    offset: int = 0,
+    limit: Optional[int] = None,
+    page_size: int = 100,
+) -> Dict[str, Any]:
+    """Collect an offset range or all pages from an offset-based CompShare API."""
+    if page_size < 1:
+        raise ValueError("page_size must be positive")
+
+    combined: Optional[Dict[str, Any]] = None
+    rows: list[Dict[str, Any]] = []
+    current_offset = offset
+    remaining = limit
+
+    while remaining is None or remaining > 0:
+        current_limit = page_size if remaining is None else min(page_size, remaining)
+        response = call(
+            runtime,
+            action,
+            {**params, "Limit": current_limit, "Offset": current_offset},
+        )
+        if combined is None:
+            combined = dict(response)
+        page = list(response.get(list_key) or [])
+        rows.extend(page)
+        current_offset += len(page)
+        if remaining is not None:
+            remaining -= len(page)
+
+        total = response.get("TotalCount")
+        if not page or len(page) < current_limit:
+            break
+        if isinstance(total, int) and current_offset >= total:
+            break
+
+    result = combined or {}
+    result[list_key] = rows
+    result["ReturnedCount"] = len(rows)
+    result["Offset"] = offset
+    if limit is not None:
+        result["Limit"] = limit
+    return result
+
+
+def download_file(
+    runtime: Runtime,
+    action: str,
+    params: Dict[str, Any],
+) -> Tuple[bytes, Dict[str, str]]:
+    """Download a non-JSON API response while preserving normal CLI error handling."""
+    try:
+        return CompShareSDK(runtime.profile, runtime.region).download(action, params)
+    except CLIError as error:
+        Renderer(runtime.json_output).error(str(error))
+        raise typer.Exit(1) from error
+    except ucloud_exc.RetCodeException as error:
+        hint = error_hint(error.action or action, error.code)
+        Renderer(runtime.json_output).error(
+            _with_hint(error.message or str(error), hint),
+            details={
+                "action": error.action or action,
+                "ret_code": error.code,
+                "request_uuid": error.request_uuid,
+                "hint": hint,
+            },
+        )
+        raise typer.Exit(1) from error
+    except ucloud_exc.UCloudException as error:
+        Renderer(runtime.json_output).error(str(error))
+        raise typer.Exit(1) from error
+    except Exception as error:
+        Renderer(runtime.json_output).error(str(error))
+        raise typer.Exit(1) from error
+
+
 def error_hint(action: str, code: int) -> Optional[str]:
     hints = {
         ("DeleteCompshareDisk", 8434): "The disk is still detaching. Wait a moment and retry.",

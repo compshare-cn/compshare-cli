@@ -8,6 +8,7 @@ from compshare_cli.actions import (
     INSTANCE_ACTIONS,
     PUBLIC_ACTIONS,
     STORAGE_ACTIONS,
+    TEAM_ACTIONS,
     UNAVAILABLE_ACTIONS,
 )
 
@@ -16,7 +17,8 @@ def test_public_action_counts() -> None:
     assert len(INSTANCE_ACTIONS) == 27
     assert len(IMAGE_ACTIONS) == 16
     assert len(STORAGE_ACTIONS) == 7
-    assert len(PUBLIC_ACTIONS) == 50
+    assert len(TEAM_ACTIONS) == 17
+    assert len(PUBLIC_ACTIONS) == 67
 
 
 def test_every_public_action_is_wired_into_a_command() -> None:
@@ -32,6 +34,7 @@ def test_every_public_action_is_wired_into_a_command() -> None:
         ("instance", INSTANCE_ACTIONS),
         ("image", IMAGE_ACTIONS),
         ("data", STORAGE_ACTIONS),
+        ("team", TEAM_ACTIONS),
     ],
 )
 def test_action_registry_matches_local_public_docs(directory: str, expected: frozenset) -> None:

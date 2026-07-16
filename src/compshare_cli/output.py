@@ -115,10 +115,11 @@ class Renderer:
         if key and key.casefold() in {"state", "status"}:
             state = str(value)
             normalized = state.casefold()
+            display = tr(state)
             if normalized in {"running", "available", "success", "succeeded"}:
-                return f"[green]{state}[/green]"
+                return f"[green]{display}[/green]"
             if normalized in {"failed", "error", "terminated"}:
-                return f"[red]{state}[/red]"
+                return f"[red]{display}[/red]"
             if normalized not in {"stopped", "closed"}:
-                return f"[yellow]{state}[/yellow]"
+                return f"[yellow]{display}[/yellow]"
         return str(value)

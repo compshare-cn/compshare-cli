@@ -4,17 +4,18 @@ import shlex
 import subprocess
 import sys
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
 import typer
 
-from compshare_cli.api import call, invoke
+from compshare_cli.api import call, call_captured, collect_pages, invoke
 from compshare_cli.commands.common import confirm, confirm_details, request, runtime
 from compshare_cli.errors import UsageError
 from compshare_cli.i18n import tr
 from compshare_cli.location import locate_instance, region_from_zone, supported_regions
 from compshare_cli.output import Renderer
-from compshare_cli.parsing import compact, disk_gib, encode_password, memory_mib, timestamp
+from compshare_cli.parsing import compact, disk_gib, encode_password, memory_mib, money, timestamp
 from compshare_cli.runtime import Runtime
 
 app = typer.Typer(help="Manage GPU instances.", no_args_is_help=True)
@@ -144,11 +145,14 @@ def _wait_for_instance(
     started = time.monotonic()
     previous: Optional[str] = None
     while True:
-        response = call(
+        response, error = call_captured(
             state,
             "DescribeCompShareInstance",
             {"Region": region, "UHostIds": [instance]},
         )
+        if error:
+            raise UsageError(str(error["message"]))
+        response = response or {}
         hosts = response.get("UHostSet", [])
         if absent and not hosts:
             return response
@@ -182,6 +186,58 @@ def _wait_for_instance(
                 )
             )
         time.sleep(3)
+
+
+def _locate_instances(
+    state: Runtime,
+    instances: Sequence[str],
+) -> Tuple[Dict[str, Tuple[str, str, Dict[str, Any]]], List[str]]:
+    requested = list(dict.fromkeys(instances))
+    if len(requested) == 1:
+        try:
+            region, zone, host = locate_instance(state, requested[0])
+        except UsageError:
+            return {}, requested
+        return {requested[0]: (region, zone, host)}, []
+
+    remaining = set(requested)
+    found: Dict[str, Tuple[str, str, Dict[str, Any]]] = {}
+    for region in supported_regions(state):
+        if not remaining:
+            break
+        response = collect_pages(
+            state,
+            "DescribeCompShareInstance",
+            {"Region": region, "UHostIds": list(remaining)},
+            "UHostSet",
+        )
+        for raw in response.get("UHostSet", []):
+            host = dict(raw)
+            instance = str(host.get("UHostId") or "")
+            if instance not in remaining:
+                continue
+            zone = str(host.get("Zone") or state.zone)
+            found[instance] = (region, zone, host)
+            remaining.remove(instance)
+    return found, [instance for instance in requested if instance in remaining]
+
+
+def _price_total(price: Dict[str, Any], count: int) -> Optional[Decimal]:
+    details = price.get("PriceDetails", [])
+    if not details:
+        return None
+    values = [details[0].get(key) for key in ("Instance", "Disks", "SystemDisks", "CompShareImage")]
+    total = Decimal("0")
+    found = False
+    for value in values:
+        if isinstance(value, bool) or value is None:
+            continue
+        try:
+            total += Decimal(str(value))
+            found = True
+        except InvalidOperation:
+            continue
+    return total * count if found else None
 
 
 def _project_id(state: Runtime, explicit: Optional[str]) -> str:
@@ -468,6 +524,7 @@ def list_instances(
     zone: Optional[str] = typer.Option(None, "--zone", help="Filter by availability zone."),
     limit: int = typer.Option(20, min=1, max=100, help="Maximum number of results."),
     offset: int = typer.Option(0, min=0, help="Number of results to skip."),
+    all_results: bool = typer.Option(False, "--all", help="Return all results."),
     tag: Optional[str] = typer.Option(None, help="Filter by instance tag."),
     vpc: Optional[str] = typer.Option(None, "--vpc", help="Filter by VPC ID."),
     subnet: Optional[str] = typer.Option(None, "--subnet", help="Filter by subnet ID."),
@@ -493,8 +550,6 @@ def list_instances(
                 "Zone": zone,
                 "ProjectId": project_id,
                 "UHostIds": ids,
-                "Limit": limit,
-                "Offset": offset,
                 "Tag": tag,
                 "VPCId": vpc,
                 "SubnetId": subnet,
@@ -506,10 +561,11 @@ def list_instances(
     regions = [selected_region] if selected_region else supported_regions(state)
     response: Dict[str, Any] = {"UHostSet": [], "RegionSet": regions}
     for current_region in regions:
-        current = call(
+        current = collect_pages(
             state,
             "DescribeCompShareInstance",
             {**params, "Region": current_region},
+            "UHostSet",
         )
         for host in current.get("UHostSet", []):
             item = dict(host)
@@ -529,9 +585,13 @@ def list_instances(
             for field, expected in filters.items()
         ):
             filtered.append(host)
+    page = filtered[offset:] if all_results else filtered[offset : offset + limit]
     result = dict(response)
-    result["UHostSet"] = filtered
+    result["UHostSet"] = page
     result["FilteredCount"] = len(filtered)
+    result["ReturnedCount"] = len(page)
+    result["Offset"] = offset
+    result["Limit"] = None if all_results else limit
     Renderer(state.json_output).data(
         result,
         rows=_instance_rows(result),
@@ -608,6 +668,11 @@ def create(
         False,
         "--dry-run",
         help="Validate and show the request without changing resources.",
+    ),
+    max_price: Optional[str] = typer.Option(
+        None,
+        "--max-price",
+        help="Maximum total quoted price in CNY.",
     ),
     wait: Optional[bool] = typer.Option(
         None,
@@ -716,16 +781,20 @@ def create(
         }
     )
     price = call(state, "GetCompShareInstancePrice", price_params)
-    price_details = price.get("PriceDetails", [])
-    amount = None
-    if price_details:
-        values = [
-            price_details[0].get(key)
-            for key in ("Instance", "Disks", "SystemDisks", "CompShareImage")
-        ]
-        numbers = [value for value in values if isinstance(value, (int, float))]
-        amount = sum(numbers) if numbers else None
-    price_text = "unknown" if amount is None else str(round(amount * max_count, 4))
+    amount = _price_total(price, max_count)
+    price_text = "unknown" if amount is None else format(amount.normalize(), "f")
+    price_limit = money(max_price) if max_price is not None else None
+    if price_limit is not None and amount is None:
+        raise UsageError(tr("The API did not return a price, so --max-price cannot be enforced."))
+    if price_limit is not None and amount is not None and amount > price_limit:
+        raise UsageError(
+            tr(
+                "Quoted price {price} CNY exceeds --max-price {maximum} CNY; "
+                "no instance was created.",
+                price=price_text,
+                maximum=format(price_limit.normalize(), "f"),
+            )
+        )
     create_params = dict(common)
     create_params.update(
         compact(
@@ -762,6 +831,7 @@ def create(
     }
     plan = {
         "dry_run": dry_run,
+        "max_price": str(price_limit) if price_limit is not None else None,
         "selection": selection,
         "capacity": selected_spec,
         "price": price,
@@ -867,10 +937,123 @@ def _lifecycle(
     Renderer(state.json_output).success(tr("Operation completed"), result)
 
 
-@app.command("start", help="Start an instance.")
+def _render_batch(
+    state: Runtime,
+    action: str,
+    succeeded: List[Dict[str, Any]],
+    failed: List[Dict[str, Any]],
+) -> None:
+    payload = {
+        "ok": not failed,
+        "action": action,
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+    rows = [
+        {"UHostId": item["instance"], "Status": "Succeeded", "Message": ""} for item in succeeded
+    ]
+    rows.extend(
+        {
+            "UHostId": item["instance"],
+            "Status": "Failed",
+            "Message": item["error"].get("message"),
+        }
+        for item in failed
+    )
+    Renderer(state.json_output).data(
+        payload,
+        rows=rows,
+        columns=(("UHostId", "INSTANCE"), ("Status", "STATUS"), ("Message", "MESSAGE")),
+    )
+    if failed:
+        raise typer.Exit(1)
+
+
+def _batch_lifecycle(
+    ctx: typer.Context,
+    action: str,
+    instances: Sequence[str],
+    message: str,
+    *,
+    yes: bool = True,
+    confirm_operation: bool = False,
+    extra: Optional[Dict[str, Any]] = None,
+    wait: Optional[bool] = None,
+    timeout: int = 600,
+    desired: Optional[set[str]] = None,
+    absent: bool = False,
+) -> None:
+    state = runtime(ctx)
+    requested = list(dict.fromkeys(instances))
+    locations, missing = _locate_instances(state, requested)
+    if confirm_operation:
+        confirm_details(
+            state,
+            "Operation plan",
+            [("INSTANCE", requested), ("ACTION", tr(message.rstrip("?")))],
+            "Confirm this operation?",
+            yes,
+        )
+
+    succeeded: List[Dict[str, Any]] = []
+    failed: List[Dict[str, Any]] = [
+        {
+            "instance": instance,
+            "error": {
+                "message": tr(
+                    "Instance {instance} was not found in any supported region.",
+                    instance=instance,
+                )
+            },
+        }
+        for instance in missing
+    ]
+    for instance in requested:
+        location = locations.get(instance)
+        if location is None:
+            continue
+        region, zone, _ = location
+        params = request(ctx, zone=True, region_value=region, zone_value=zone)
+        params.update({"UHostId": instance, **(extra or {})})
+        submitted, error = call_captured(state, action, params)
+        if error:
+            failed.append({"instance": instance, "region": region, "zone": zone, "error": error})
+            continue
+        result: Dict[str, Any] = {
+            "instance": instance,
+            "region": region,
+            "zone": zone,
+            "operation": submitted or {},
+        }
+        if _wait_enabled(state, wait):
+            try:
+                result["final"] = _wait_for_instance(
+                    state,
+                    instance,
+                    region=region,
+                    desired=desired,
+                    absent=absent,
+                    timeout=timeout,
+                )
+            except UsageError as error:
+                failed.append(
+                    {
+                        "instance": instance,
+                        "region": region,
+                        "zone": zone,
+                        "operation": submitted or {},
+                        "error": {"message": str(error), "phase": "wait"},
+                    }
+                )
+                continue
+        succeeded.append(result)
+    _render_batch(state, action, succeeded, failed)
+
+
+@app.command("start", help="Start one or more instances.")
 def start(
     ctx: typer.Context,
-    instance: str,
+    instances: List[str] = typer.Argument(..., help="Instance IDs."),
     without_gpu: Optional[str] = typer.Option(
         None, "--without-gpu", help="No-GPU specification: A or B."
     ),
@@ -879,71 +1062,68 @@ def start(
     ),
     timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
 ) -> None:
-    state = runtime(ctx)
-    region, zone, _ = locate_instance(state, instance)
-    params = request(ctx, zone=True, region_value=region, zone_value=zone)
-    params.update(compact({"UHostId": instance, "WithoutGpuSpec": without_gpu}))
-    submitted = call(state, "StartCompShareInstance", params)
-    result: Dict[str, Any] = {"operation": submitted}
-    if _wait_enabled(state, wait):
-        result["final"] = _wait_for_instance(
-            state,
-            instance,
-            region=region,
-            desired={"Running"},
-            timeout=timeout,
-        )
-    Renderer(state.json_output).success(tr("Operation completed"), result)
-
-
-@app.command("stop", help="Stop an instance.")
-def stop(
-    ctx: typer.Context,
-    instance: str,
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
-    wait: Optional[bool] = typer.Option(
-        None, "--wait/--no-wait", help="Wait for the operation to reach a stable state."
-    ),
-    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
-) -> None:
-    _lifecycle(
+    _batch_lifecycle(
         ctx,
-        "StopCompShareInstance",
-        instance,
-        "Stop instance",
-        yes=yes,
-        wait=wait,
-        timeout=timeout,
-        desired={"Stopped"},
-    )
-
-
-@app.command("reboot", help="Reboot an instance.")
-def reboot(
-    ctx: typer.Context,
-    instance: str,
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
-    wait: Optional[bool] = typer.Option(
-        None, "--wait/--no-wait", help="Wait for the operation to reach a stable state."
-    ),
-    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
-) -> None:
-    _lifecycle(
-        ctx,
-        "RebootCompShareInstance",
-        instance,
-        "Reboot instance",
-        yes=yes,
+        "StartCompShareInstance",
+        instances,
+        "Start instance",
+        extra=compact({"WithoutGpuSpec": without_gpu}),
         wait=wait,
         timeout=timeout,
         desired={"Running"},
     )
 
 
-@app.command("delete", help="Permanently delete an instance.")
+@app.command("stop", help="Stop one or more instances.")
+def stop(
+    ctx: typer.Context,
+    instances: List[str] = typer.Argument(..., help="Instance IDs."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    wait: Optional[bool] = typer.Option(
+        None, "--wait/--no-wait", help="Wait for the operation to reach a stable state."
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
+) -> None:
+    _batch_lifecycle(
+        ctx,
+        "StopCompShareInstance",
+        instances,
+        "Stop instance",
+        yes=yes,
+        confirm_operation=True,
+        wait=wait,
+        timeout=timeout,
+        desired={"Stopped"},
+    )
+
+
+@app.command("reboot", help="Reboot one or more instances.")
+def reboot(
+    ctx: typer.Context,
+    instances: List[str] = typer.Argument(..., help="Instance IDs."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    wait: Optional[bool] = typer.Option(
+        None, "--wait/--no-wait", help="Wait for the operation to reach a stable state."
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
+) -> None:
+    _batch_lifecycle(
+        ctx,
+        "RebootCompShareInstance",
+        instances,
+        "Reboot instance",
+        yes=yes,
+        confirm_operation=True,
+        wait=wait,
+        timeout=timeout,
+        desired={"Running"},
+    )
+
+
+@app.command("delete", help="Permanently delete one or more instances.")
 def delete(
     ctx: typer.Context,
-    instance: str,
+    instances: List[str] = typer.Argument(..., help="Instance IDs."),
     release_disk: bool = typer.Option(
         False, "--release-disk", help="Delete attached data disks with the instance."
     ),
@@ -953,19 +1133,70 @@ def delete(
     ),
     timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
 ) -> None:
-    _lifecycle(
+    _batch_lifecycle(
         ctx,
         "TerminateCompShareInstance",
-        instance,
+        instances,
         "Permanently delete instance and attached data disks"
         if release_disk
         else "Permanently delete instance",
         yes=yes,
+        confirm_operation=True,
         extra={"ReleaseUDisk": release_disk},
         wait=wait,
         timeout=timeout,
         absent=True,
     )
+
+
+@app.command("wait", help="Wait for instances to reach a state.")
+def wait_for_instances(
+    ctx: typer.Context,
+    instances: List[str] = typer.Argument(..., help="Instance IDs."),
+    state: str = typer.Option("Running", "--state", help="Target instance state."),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
+) -> None:
+    runtime_state = runtime(ctx)
+    requested = list(dict.fromkeys(instances))
+    locations, missing = _locate_instances(runtime_state, requested)
+    succeeded: List[Dict[str, Any]] = []
+    failed: List[Dict[str, Any]] = [
+        {
+            "instance": instance,
+            "error": {
+                "message": tr(
+                    "Instance {instance} was not found in any supported region.",
+                    instance=instance,
+                )
+            },
+        }
+        for instance in missing
+    ]
+    for instance in requested:
+        location = locations.get(instance)
+        if location is None:
+            continue
+        region, zone, _ = location
+        try:
+            final = _wait_for_instance(
+                runtime_state,
+                instance,
+                region=region,
+                desired={state},
+                timeout=timeout,
+            )
+        except UsageError as error:
+            failed.append(
+                {
+                    "instance": instance,
+                    "region": region,
+                    "zone": zone,
+                    "error": {"message": str(error)},
+                }
+            )
+            continue
+        succeeded.append({"instance": instance, "region": region, "zone": zone, "final": final})
+    _render_batch(runtime_state, "wait", succeeded, failed)
 
 
 @app.command("rename", help="Rename an instance.")

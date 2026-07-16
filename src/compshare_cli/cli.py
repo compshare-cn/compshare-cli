@@ -9,7 +9,8 @@ from typer import core as typer_core
 from typer.main import get_command
 
 from compshare_cli import __version__
-from compshare_cli.commands import image, instance, storage
+from compshare_cli.commands import doctor as doctor_command
+from compshare_cli.commands import image, instance, storage, team
 from compshare_cli.config import DEFAULT_PROFILE, ConfigStore, Profile
 from compshare_cli.errors import CLIError
 from compshare_cli.i18n import configured_language, localize_command, normalize_language, tr
@@ -41,6 +42,7 @@ app = typer.Typer(
 app.add_typer(instance.app, name="instance")
 app.add_typer(image.app, name="image")
 app.add_typer(storage.app, name="storage")
+app.add_typer(team.app, name="team")
 config_app = typer.Typer(
     help="Manage credential profiles.",
     invoke_without_command=True,
@@ -210,6 +212,12 @@ def lang(
         else "Default help language set to English (en)"
     )
     renderer.success(message, {"ok": True, "language": selected})
+
+
+@app.command("doctor")
+def doctor(ctx: typer.Context) -> None:
+    """Diagnose the CLI configuration and environment."""
+    doctor_command.run(ctx.find_root().obj)
 
 
 def main(args: Optional[List[str]] = None) -> None:

@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import typer
 
-from compshare_cli.api import call, invoke
+from compshare_cli.api import call, collect_pages, invoke
 from compshare_cli.commands.common import confirm, request, runtime
 from compshare_cli.errors import UsageError
 from compshare_cli.i18n import tr
@@ -85,6 +85,7 @@ def list_images(
     user: Optional[int] = typer.Option(None, "--user", help="Organization ID for source=user."),
     limit: int = typer.Option(20, min=1, max=100, help="Maximum number of results."),
     offset: int = typer.Option(0, min=0, help="Number of results to skip."),
+    all_results: bool = typer.Option(False, "--all", help="Return all results."),
     region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
     zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
 ) -> None:
@@ -152,15 +153,22 @@ def list_images(
     selected_zone = zone or runtime(ctx).zone
     selected_region = region_from_zone(selected_zone) if source == "platform" else region
     params = request(ctx, region_value=selected_region)
-    params.update({"Limit": limit, "Offset": offset, **filters})
+    params.update(filters)
     if source == "platform":
         params["Zone"] = selected_zone
-    invoke(
-        runtime(ctx),
+    state = runtime(ctx)
+    response = collect_pages(
+        state,
         action,
         params,
-        list_key=None if grouped else list_key,
-        row_builder=_community_rows if grouped else None,
+        "CompshareImageGroup" if grouped else list_key,
+        offset=offset,
+        limit=None if all_results else limit,
+    )
+    rows = _community_rows(response) if grouped else response.get(list_key, [])
+    Renderer(state.json_output).data(
+        response,
+        rows=rows,
         columns=IMAGE_COLUMNS,
     )
 

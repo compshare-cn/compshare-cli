@@ -2,11 +2,15 @@
 
 在终端中管理优云智算 GPU 实例、实例镜像、云盘与 US3 挂载。
 
-第一阶段覆盖 `compshare-docs` 中三个公开 API 目录的 51 个 Action：
+v0.2.0 覆盖 `compshare-docs` 中四个公开 API 目录的 67 个可用 Action：
 
 - GPU 实例：27 个 Action
-- 实例镜像：17 个 Action
+- 实例镜像：16 个 Action
 - 磁盘与云存储：7 个 Action
+- 团队管理：17 个 Action
+
+镜像目录中的 `DescribeFavoriteImages` 已公开但生产接口不可用，因此不计入可用
+Action；收藏和取消收藏功能不受影响。
 
 CLI 使用官方 [`ucloud-sdk-python3`](https://github.com/ucloud/ucloud-sdk-python3) 完成鉴权、参数编码、请求传输与重试。调用层使用 SDK 的通用 `invoke` 接口，因为 CompShare 的公开 API 更新可能早于 SDK 的生成式请求模型；这样不会静默丢弃新参数。
 
@@ -96,6 +100,16 @@ compshare lang       # 查看当前语言
 
 也可以通过 `COMPSHARE_LANG=en` 覆盖当前终端会话的帮助语言。当前版本不安装 Shell completion，仅提供 `-h/--help`。
 
+遇到配置、鉴权或 SSH 环境问题时，可以运行只读诊断：
+
+```bash
+compshare doctor
+compshare --json doctor
+```
+
+该命令检查 Python、SDK、凭证、配置文件权限、API 连通性以及本机的 `ssh`、`scp`，
+不会修改配置或显示密钥。
+
 ## 实例
 
 ### 查规格和库存
@@ -159,6 +173,12 @@ compshare instance create \
 compshare instance create ... --dry-run --json
 ```
 
+自动化创建可以设置总报价上限，超过上限时不会创建实例：
+
+```bash
+compshare instance create ... --max-price 20 --yes
+```
+
 人类交互终端默认等待创建和生命周期操作进入稳定状态，脚本使用的 JSON 模式默认提交后立即返回。可以用 `--wait`、`--no-wait` 和 `--timeout` 显式控制；创建镜像也支持相同选项。
 
 ### 命令概览
@@ -174,6 +194,7 @@ compshare instance start INSTANCE
 compshare instance stop INSTANCE
 compshare instance reboot INSTANCE
 compshare instance delete INSTANCE
+compshare instance wait INSTANCE... --state Running
 compshare instance rename INSTANCE NAME
 compshare instance password INSTANCE
 compshare instance reinstall INSTANCE
@@ -193,6 +214,16 @@ compshare instance schedule set INSTANCE --at 2h
 compshare instance schedule cancel INSTANCE
 compshare instance software list
 compshare instance software url INSTANCE JupyterLab
+```
+
+`start`、`stop`、`reboot` 和 `delete` 都可以一次传入多个实例 ID。批量操作只确认
+一次；JSON 输出包含 `succeeded` 和 `failed`，部分失败时返回非零退出码。
+
+`instance list` 的 `--limit` 和 `--offset` 在跨地域聚合及本地筛选后统一生效，使用
+`--all` 返回全部匹配实例：
+
+```bash
+compshare --json instance list --status Running --all
 ```
 
 `ssh` 会在连接前显示 API 返回的实例密码；使用 `ssh INSTANCE --print` 时会同时输出 SSH 命令和密码。
@@ -237,6 +268,7 @@ compshare image tags
 社区镜像列表支持名称、作者、模糊查询、标签、免费/付费、官方/非官方、自启动和排序筛选。封面文件由 CLI 转成 Base64，README 文件按 UTF-8 读取。
 
 创建镜像时可使用 `--wait` 跟踪 `GetCompShareImageCreateProgress`，或继续使用独立的 `image progress` 命令。
+`image list --all` 会自动读取全部分页。
 
 ## 磁盘与云存储
 
@@ -255,6 +287,40 @@ compshare storage us3 attach --instance INSTANCE
 
 云盘删除会对“仍在卸载中”的暂时性错误自动重试；其他已知生产错误会附带可执行的处理建议。
 
+## 团队管理
+
+```text
+compshare team list
+compshare team joined
+compshare team show TEAM
+compshare team create NAME
+compshare team update TEAM
+compshare team delete TEAM
+compshare team invite list
+compshare team invite send TEAM USER...
+compshare team invite accept TEAM
+compshare team invite reject TEAM
+compshare team invite cancel TEAM USER
+compshare team member list TEAM
+compshare team member rename TEAM USER NAME
+compshare team quota grant TEAM MEMBER... --amount 1000
+compshare team quota reclaim TEAM MEMBER... --amount 1000
+compshare team billing list TEAM MEMBER
+compshare team billing summary TEAM MEMBER
+compshare team billing unpaid TEAM MEMBER
+compshare team billing products TEAM MEMBER
+compshare team billing export TEAM --output orders.csv
+compshare team audit TEAM
+```
+
+邀请命令使用用户企业 ID，可以写成 `USER_ID:备注`。额度命令接收人民币元并精确转换
+为 API 使用的分。账单查询接受 Unix 时间戳、ISO 8601 时间；`--start 7d` 表示从
+七天前开始。账单导出直接保存 API 返回的 CSV 文件流，目标已存在时须使用
+`--force` 才会覆盖。
+
+公开的 `SetCompShareTeamRelation` 文档没有给出“移除成员”对应的 `Status` 枚举，因此
+当前版本不提供未经验证的 `team member remove`。
+
 ## 开发校验
 
 ```bash
@@ -263,4 +329,5 @@ compshare storage us3 attach --instance INSTANCE
 .venv/bin/pytest
 ```
 
-公开 Action 清单维护在 `compshare_cli.actions` 中，测试会校验 27/17/7 的领域数量以及命令实现是否包含全部 51 个 Action。
+公开 Action 清单维护在 `compshare_cli.actions` 中，测试会校验 27/16/7/17 的领域数量
+以及命令实现是否包含全部 67 个可用 Action。

@@ -5,7 +5,8 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from compshare_cli import cli
-from compshare_cli.commands import instance
+from compshare_cli.commands import doctor as doctor_module
+from compshare_cli.commands import instance, team
 from compshare_cli.i18n import localize_command
 
 runner = CliRunner()
@@ -19,6 +20,9 @@ runner = CliRunner()
         ["image", "--help"],
         ["storage", "--help"],
         ["storage", "disk", "--help"],
+        ["team", "--help"],
+        ["team", "invite", "--help"],
+        ["team", "billing", "--help"],
     ],
 )
 def test_help_tree(args) -> None:
@@ -29,12 +33,12 @@ def test_help_tree(args) -> None:
 
 def test_global_json_is_accepted_before_command(capsys) -> None:
     cli.main(["--json", "version"])
-    assert json.loads(capsys.readouterr().out) == {"version": "0.1.3"}
+    assert json.loads(capsys.readouterr().out) == {"version": "0.2.0"}
 
 
 def test_global_profile_is_accepted_before_command(capsys) -> None:
     cli.main(["--profile", "testing", "--json", "version"])
-    assert json.loads(capsys.readouterr().out) == {"version": "0.1.3"}
+    assert json.loads(capsys.readouterr().out) == {"version": "0.2.0"}
 
 
 def test_no_args_shows_help_without_error(capsys) -> None:
@@ -418,10 +422,10 @@ def test_instance_wait_polls_until_running(monkeypatch) -> None:
     def fake_call(state, action, params):
         calls.append(action)
         if action == "StartCompShareInstance":
-            return {"RetCode": 0}
-        return {"UHostSet": [{"UHostId": "uhost-1", "State": "Running"}]}
+            return {"RetCode": 0}, None
+        return {"UHostSet": [{"UHostId": "uhost-1", "State": "Running"}]}, None
 
-    monkeypatch.setattr(instance, "call", fake_call)
+    monkeypatch.setattr(instance, "call_captured", fake_call)
     monkeypatch.setattr(
         instance,
         "locate_instance",
@@ -438,7 +442,9 @@ def test_instance_wait_polls_until_running(monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert calls == ["StartCompShareInstance", "DescribeCompShareInstance"]
-    assert json.loads(result.stdout)["final"]["UHostSet"][0]["State"] == "Running"
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["succeeded"][0]["final"]["UHostSet"][0]["State"] == "Running"
 
 
 def test_schedule_auto_detects_project_id(monkeypatch) -> None:
@@ -583,3 +589,279 @@ def test_ssh_shows_password_before_connecting(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "Password: instance-secret" in result.stdout
     assert commands == [["ssh", "root@example.invalid"]]
+
+
+def test_instance_list_applies_global_pagination_after_filters(monkeypatch) -> None:
+    responses = {
+        "cn-a": [
+            {"UHostId": "a-1", "State": "Running"},
+            {"UHostId": "a-2", "State": "Stopped"},
+            {"UHostId": "a-3", "State": "Running"},
+        ],
+        "cn-b": [
+            {"UHostId": "b-1", "State": "Running"},
+            {"UHostId": "b-2", "State": "Running"},
+        ],
+    }
+    monkeypatch.setattr(instance, "supported_regions", lambda state: ["cn-a", "cn-b"])
+
+    def fake_pages(state, action, params, list_key, **kwargs):
+        assert action == "DescribeCompShareInstance"
+        assert kwargs == {}
+        return {"UHostSet": responses[params["Region"]]}
+
+    monkeypatch.setattr(instance, "collect_pages", fake_pages)
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "list", "--status", "Running", "--limit", "2", "--offset", "1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["TotalCount"] == 5
+    assert payload["FilteredCount"] == 4
+    assert payload["ReturnedCount"] == 2
+    assert [item["UHostId"] for item in payload["UHostSet"]] == ["a-3", "b-1"]
+
+
+def test_instance_list_all_ignores_display_limit(monkeypatch) -> None:
+    monkeypatch.setattr(instance, "supported_regions", lambda state: ["cn-a"])
+    monkeypatch.setattr(
+        instance,
+        "collect_pages",
+        lambda *args, **kwargs: {"UHostSet": [{"UHostId": f"host-{index}"} for index in range(25)]},
+    )
+    result = runner.invoke(cli.app, ["--json", "instance", "list", "--all"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["Limit"] is None
+    assert payload["ReturnedCount"] == 25
+
+
+def test_batch_lifecycle_reports_partial_failure(monkeypatch) -> None:
+    locations = {
+        value: ("cn-a", "cn-a-01", {"UHostId": value, "Zone": "cn-a-01"})
+        for value in ("host-1", "host-2")
+    }
+    monkeypatch.setattr(
+        instance,
+        "_locate_instances",
+        lambda state, values: (locations, []),
+    )
+
+    def fake_call(state, action, params):
+        if params["UHostId"] == "host-2":
+            return None, {"message": "capacity unavailable", "ret_code": 1}
+        return {"RetCode": 0}, None
+
+    monkeypatch.setattr(instance, "call_captured", fake_call)
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "start", "host-1", "host-2", "--no-wait"],
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert [item["instance"] for item in payload["succeeded"]] == ["host-1"]
+    assert payload["failed"][0]["instance"] == "host-2"
+
+
+def test_create_max_price_stops_before_create(monkeypatch, capsys) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append(action)
+        if action == "CheckCompShareResourceCapacity":
+            return {"Specs": [{"Gpu": 1, "Cpu": 12, "Mem": 32, "ResourceEnough": True}]}
+        if action == "GetCompShareInstancePrice":
+            return {"PriceDetails": [{"Instance": 0.7, "SystemDisks": 0}]}
+        raise AssertionError(action)
+
+    monkeypatch.setattr(instance, "call", fake_call)
+    with pytest.raises(SystemExit) as raised:
+        cli.main(
+            [
+                "--json",
+                "instance",
+                "create",
+                "--gpu",
+                "3080Ti",
+                "--count",
+                "1",
+                "--cpu",
+                "12",
+                "--memory",
+                "32GiB",
+                "--image",
+                "image-1",
+                "--max-price",
+                "0.50",
+                "--yes",
+            ]
+        )
+
+    assert raised.value.code == 2
+    assert calls == ["CheckCompShareResourceCapacity", "GetCompShareInstancePrice"]
+    assert "0.7" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_team_invite_builds_user_info(monkeypatch) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append((action, params))
+        return {"RetCode": 0, "ErrorMap": {}}
+
+    monkeypatch.setattr(team, "call", fake_call)
+    result = runner.invoke(
+        cli.app,
+        ["team", "invite", "send", "1001", "50001:Alice", "50002", "--yes"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0][0] == "CreateCompShareTeamRelation"
+    assert calls[0][1]["UserInfo"] == [
+        {"UserCompanyId": 50001, "RemarkName": "Alice"},
+        {"UserCompanyId": 50002},
+    ]
+
+
+def test_team_invite_reports_partial_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        team,
+        "call",
+        lambda state, action, params: {
+            "RetCode": 0,
+            "ErrorMap": {"50002": {"Code": 16001, "Message": "already joined"}},
+        },
+    )
+    result = runner.invoke(
+        cli.app,
+        ["--json", "team", "invite", "send", "1001", "50001", "50002", "--yes"],
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["ErrorMap"]["50002"]["Code"] == 16001
+
+
+def test_team_quota_converts_yuan_to_cents(monkeypatch) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append((action, params))
+        return {"RetCode": 0, "FailedMembers": {}}
+
+    monkeypatch.setattr(team, "call", fake_call)
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "team",
+            "quota",
+            "grant",
+            "1001",
+            "60001",
+            "60002",
+            "--amount",
+            "123.45",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0][0] == "SetCompShareTeamAmount"
+    assert calls[0][1]["VirtualCompanyId"] == [60001, 60002]
+    assert calls[0][1]["Amount"] == 12345
+    assert calls[0][1]["OperateType"] == "AllocateAmount"
+
+
+def test_team_quota_reports_partial_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        team,
+        "call",
+        lambda state, action, params: {
+            "RetCode": 0,
+            "FailedMembers": {"60002": {"Code": 17001, "Message": "insufficient quota"}},
+        },
+    )
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "team",
+            "quota",
+            "reclaim",
+            "1001",
+            "60001",
+            "60002",
+            "--amount",
+            "1.00",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["FailedMembers"]["60002"]["Code"] == 17001
+
+
+def test_team_unpaid_combines_orders_and_summary(monkeypatch) -> None:
+    monkeypatch.setattr(
+        team,
+        "collect_pages",
+        lambda *args, **kwargs: {"OrderInfos": [{"OrderNo": "order-1"}]},
+    )
+    monkeypatch.setattr(
+        team,
+        "call",
+        lambda state, action, params: {"TotalCount": 1, "Amount": "50.00"},
+    )
+    result = runner.invoke(
+        cli.app,
+        ["--json", "team", "billing", "unpaid", "1001", "60001"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["orders"]["OrderInfos"][0]["OrderNo"] == "order-1"
+    assert payload["summary"]["Amount"] == "50.00"
+
+
+def test_team_export_writes_csv(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        team,
+        "download_file",
+        lambda state, action, params: (b"order,amount\n1,10\n", {"Content-Type": "text/csv"}),
+    )
+    output = tmp_path / "orders.csv"
+    result = runner.invoke(
+        cli.app,
+        ["--json", "team", "billing", "export", "1001", "--output", str(output)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert output.read_bytes() == b"order,amount\n1,10\n"
+    assert json.loads(result.stdout)["path"] == str(output)
+
+
+def test_doctor_is_read_only_and_json(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(tmp_path / "config.json"))
+    monkeypatch.setenv("COMPSHARE_PUBLIC_KEY", "public")
+    monkeypatch.setenv("COMPSHARE_PRIVATE_KEY", "private")
+    monkeypatch.setattr(
+        doctor_module,
+        "call_captured",
+        lambda state, action, params: ({"ZoneInfo": [{"Zone": "cn-a-01"}]}, None),
+    )
+    monkeypatch.setattr(doctor_module.shutil, "which", lambda value: f"/usr/bin/{value}")
+    result = runner.invoke(cli.app, ["--json", "doctor"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert {item["Check"] for item in payload["checks"]} >= {"Credentials", "API", "ssh"}

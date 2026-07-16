@@ -4,7 +4,15 @@ import pytest
 
 from compshare_cli import parsing
 from compshare_cli.errors import UsageError
-from compshare_cli.parsing import disk_gib, encode_password, memory_mib, timestamp
+from compshare_cli.parsing import (
+    disk_gib,
+    encode_password,
+    memory_mib,
+    money,
+    money_cents,
+    past_timestamp,
+    timestamp,
+)
 
 
 def test_memory_and_disk_units() -> None:
@@ -32,3 +40,12 @@ def test_relative_timestamp(monkeypatch) -> None:
     assert timestamp("30m") == 2_800
     assert timestamp("2h") == 8_200
     assert timestamp("1d") == 87_400
+    assert past_timestamp("30m") == -800
+    assert past_timestamp("2h") == -6_200
+
+
+def test_money_uses_exact_cents() -> None:
+    assert str(money("123.45")) == "123.45"
+    assert money_cents("123.45") == 12_345
+    with pytest.raises(UsageError):
+        money("1.001")

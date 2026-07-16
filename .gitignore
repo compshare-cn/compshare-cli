@@ -8,3 +8,8 @@ __pycache__/
 htmlcov/
 dist/
 build/
+.env
+.env.*
+.compshare/
+credentials.json
+config.local.json

@@ -65,7 +65,29 @@ STORAGE_ACTIONS = frozenset(
     }
 )
 
-PUBLIC_ACTIONS = INSTANCE_ACTIONS | IMAGE_ACTIONS | STORAGE_ACTIONS
+TEAM_ACTIONS = frozenset(
+    {
+        "CreateCompShareTeam",
+        "CreateCompShareTeamRelation",
+        "DeleteCompShareTeam",
+        "DescribeTeamMemberOrder",
+        "DescribeTeamMemberOrderCount",
+        "DescribeTeamMemberUnpaidOrder",
+        "DescribeTeamMemberUnpaidOrderCount",
+        "DownloadTeamOrder",
+        "GetCompShareTeamInfo",
+        "ListCompShareTeam",
+        "ListCompShareTeamInvite",
+        "ListCompShareTeamJoined",
+        "ListCompShareTeamOperateLog",
+        "ListMemberProductType",
+        "SetCompShareTeamAmount",
+        "SetCompShareTeamRelation",
+        "UpdateCompShareTeam",
+    }
+)
+
+PUBLIC_ACTIONS = INSTANCE_ACTIONS | IMAGE_ACTIONS | STORAGE_ACTIONS | TEAM_ACTIONS
 
 # Documented publicly but unavailable in the production API (RetCode 161).
 UNAVAILABLE_ACTIONS = frozenset({"DescribeFavoriteImages"})

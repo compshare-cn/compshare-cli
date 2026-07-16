@@ -4,6 +4,7 @@ import base64
 import re
 import time
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -62,6 +63,31 @@ def timestamp(value: str) -> int:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return int(parsed.timestamp())
+
+
+def past_timestamp(value: str) -> int:
+    """Parse an absolute time or a duration such as 7d before the current time."""
+    relative = re.fullmatch(r"\s*(\d+)\s*([mhd])\s*", value, re.IGNORECASE)
+    if not relative:
+        return timestamp(value)
+    amount = int(relative.group(1))
+    seconds = {"m": 60, "h": 3600, "d": 86400}[relative.group(2).lower()]
+    return int(time.time()) - amount * seconds
+
+
+def money(value: str) -> Decimal:
+    """Parse a positive CNY amount with no more than two decimal places."""
+    try:
+        amount = Decimal(value)
+    except InvalidOperation as exc:
+        raise UsageError(tr("Invalid amount: {value}. Example: 1000.50", value=value)) from exc
+    if not amount.is_finite() or amount <= 0 or amount.as_tuple().exponent < -2:
+        raise UsageError(tr("Amount must be positive and use at most two decimal places."))
+    return amount
+
+
+def money_cents(value: str) -> int:
+    return int(money(value) * 100)
 
 
 def compact(values: Dict[str, Any]) -> Dict[str, Any]:

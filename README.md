@@ -13,7 +13,7 @@
 ## 安装
 
 ```bash
-python -m pip install "git+https://github.com/BennielAllan/compshare-cli.git"
+python -m pip install compshare-cli
 compshare -h
 ```
 
@@ -153,4 +153,5 @@ ruff format --check .
 pytest
 ```
 
-公开 API 覆盖范围和版本变化见 [CHANGELOG.md](CHANGELOG.md)。
+公开 API 覆盖范围和版本变化见 [CHANGELOG.md](CHANGELOG.md)，维护者发布流程见
+[RELEASING.md](RELEASING.md)。

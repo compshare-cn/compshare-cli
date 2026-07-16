@@ -31,3 +31,9 @@ def test_instance_location_searches_supported_regions(monkeypatch) -> None:
         "DescribeCompShareSupportZone",
         "DescribeCompShareInstance",
     ]
+
+
+def test_supported_locations_accepts_null_list(monkeypatch) -> None:
+    monkeypatch.setattr(location, "call", lambda *args, **kwargs: {"ZoneInfo": None})
+
+    assert location.supported_locations(Runtime()) == []

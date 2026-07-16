@@ -51,7 +51,7 @@ class Renderer:
 
     def table(
         self,
-        rows: Iterable[Dict[str, Any]],
+        rows: Optional[Iterable[Dict[str, Any]]],
         columns: Sequence[Tuple[str, str]],
     ) -> None:
         table = Table(show_header=True, header_style="bold")
@@ -59,7 +59,7 @@ class Renderer:
             justify = "right" if key in {"CPU", "GPU", "Size", "Price", "InstancePrice"} else "left"
             table.add_column(tr(label), justify=justify)
         count = 0
-        for row in rows:
+        for row in rows or ():
             count += 1
             table.add_row(*(self._cell(row.get(key), key=key) for key, _ in columns))
         if count:

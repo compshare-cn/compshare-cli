@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -50,9 +51,22 @@ class ConfigStore:
             raise ConfigError(f"无法读取配置文件 {self.path}: {exc}") from exc
         if not isinstance(data, dict) or not isinstance(data.get("profiles", {}), dict):
             raise ConfigError(f"配置文件格式无效: {self.path}")
+        profiles = data.get("profiles", {})
+        if any(
+            not isinstance(name, str)
+            or not name.strip()
+            or not isinstance(profile, dict)
+            or any(
+                key in profile and not isinstance(profile[key], str)
+                for key in ("public_key", "private_key")
+            )
+            for name, profile in profiles.items()
+        ):
+            raise ConfigError(f"配置文件中的凭证格式无效: {self.path}")
         return data
 
     def save_profile(self, name: str, profile: Profile, *, activate: bool = True) -> None:
+        self._validate_profile_name(name)
         data = self._read()
         profiles = data.setdefault("profiles", {})
         profiles[name] = {key: value for key, value in asdict(profile).items() if value is not None}
@@ -67,6 +81,7 @@ class ConfigStore:
         return str(self._read().get("current_profile", DEFAULT_PROFILE))
 
     def use_profile(self, name: str) -> None:
+        self._validate_profile_name(name)
         data = self._read()
         if name not in data.get("profiles", {}):
             raise ConfigError(f"Credential profile does not exist: {name}")
@@ -74,6 +89,7 @@ class ConfigStore:
         self._write(data)
 
     def delete_profile(self, name: str) -> None:
+        self._validate_profile_name(name)
         data = self._read()
         profiles = data.get("profiles", {})
         if name not in profiles:
@@ -93,16 +109,37 @@ class ConfigStore:
         self._write(data)
 
     def _write(self, data: Dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.path.parent, stat.S_IRWXU)
-        temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
-        temporary.replace(self.path)
-        os.chmod(self.path, stat.S_IRUSR | stat.S_IWUSR)
+        temporary: Optional[Path] = None
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(self.path.parent, stat.S_IRWXU)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.path.parent,
+                prefix=f".{self.path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temporary = Path(handle.name)
+                os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
+                handle.write(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary.replace(self.path)
+            os.chmod(self.path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError as exc:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise ConfigError(f"无法写入配置文件 {self.path}: {exc}") from exc
+
+    @staticmethod
+    def _validate_profile_name(name: str) -> None:
+        if not name.strip():
+            raise ConfigError("凭证配置名称不能为空。")
 
     def load_profile(self, name: Optional[str] = None) -> Profile:
         data = self._read()

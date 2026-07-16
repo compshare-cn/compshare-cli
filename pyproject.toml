@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "compshare-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "Command-line client for CompShare GPU compute"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -20,6 +20,12 @@ dependencies = [
   "ucloud-sdk-python3>=0.11.103,<0.12",
   "urllib3>=1.26.18,<2; python_version < '3.10' and platform_system == 'Darwin'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/BennielAllan/compshare-cli"
+Repository = "https://github.com/BennielAllan/compshare-cli"
+Changelog = "https://github.com/BennielAllan/compshare-cli/blob/master/CHANGELOG.md"
+Issues = "https://github.com/BennielAllan/compshare-cli/issues"
 
 [project.optional-dependencies]
 dev = [

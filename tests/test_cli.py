@@ -33,12 +33,12 @@ def test_help_tree(args) -> None:
 
 def test_global_json_is_accepted_before_command(capsys) -> None:
     cli.main(["--json", "version"])
-    assert json.loads(capsys.readouterr().out) == {"version": "0.2.0"}
+    assert json.loads(capsys.readouterr().out) == {"version": "0.2.1"}
 
 
 def test_global_profile_is_accepted_before_command(capsys) -> None:
     cli.main(["--profile", "testing", "--json", "version"])
-    assert json.loads(capsys.readouterr().out) == {"version": "0.2.0"}
+    assert json.loads(capsys.readouterr().out) == {"version": "0.2.1"}
 
 
 def test_no_args_shows_help_without_error(capsys) -> None:

@@ -1,7 +1,11 @@
 import json
 import stat
+from pathlib import Path
+
+import pytest
 
 from compshare_cli.config import ConfigStore, Profile
+from compshare_cli.errors import ConfigError
 from compshare_cli.runtime import Runtime
 
 
@@ -63,6 +67,38 @@ def test_profile_management(tmp_path) -> None:
     store.delete_profile("beta")
     assert store.list_profiles() == ["alpha"]
     assert store.current_profile() == "alpha"
+
+
+def test_invalid_profile_data_is_reported_as_config_error(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text('{"profiles":{"broken":"not-an-object"}}', encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="凭证格式无效"):
+        ConfigStore(path).load_profile("broken")
+
+    path.write_text('{"profiles":{"broken":{"public_key":123}}}', encoding="utf-8")
+    with pytest.raises(ConfigError, match="凭证格式无效"):
+        ConfigStore(path).load_profile("broken")
+
+
+def test_blank_profile_name_is_rejected(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="不能为空"):
+        ConfigStore(tmp_path / "config.json").save_profile("  ", Profile("public", "private"))
+
+
+def test_failed_config_replace_removes_temporary_file(monkeypatch, tmp_path) -> None:
+    original_replace = Path.replace
+
+    def fail_temporary_replace(path, target):
+        if path.suffix == ".tmp":
+            raise OSError("simulated replace failure")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_temporary_replace)
+    with pytest.raises(ConfigError, match="无法写入配置文件"):
+        ConfigStore(tmp_path / "config.json").save_profile("default", Profile("public", "private"))
+
+    assert list(tmp_path.glob(".*.tmp")) == []
 
 
 def test_runtime_location_is_independent_from_credentials(monkeypatch) -> None:

@@ -1,4 +1,5 @@
 from compshare_cli import api
+from compshare_cli.config import Profile
 from compshare_cli.runtime import Runtime
 
 
@@ -46,3 +47,39 @@ def test_collect_pages_accepts_null_list(monkeypatch) -> None:
 
     assert response["Items"] == []
     assert response["ReturnedCount"] == 0
+
+
+def test_collect_pages_accepts_total_field(monkeypatch) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append(params)
+        return {"Total": 100, "Items": [{"Id": index} for index in range(100)]}
+
+    monkeypatch.setattr(api, "call", fake_call)
+    response = api.collect_pages(Runtime(), "ListItems", {}, "Items")
+
+    assert response["ReturnedCount"] == 100
+    assert len(calls) == 1
+
+
+def test_invoke_accepts_null_list_in_human_output(monkeypatch, capsys) -> None:
+    class FakeSDK:
+        def __init__(self, profile, region):
+            pass
+
+        def invoke(self, action, params):
+            return {"Items": None}
+
+    monkeypatch.setenv("COMPSHARE_LANG", "en")
+    monkeypatch.setattr(api, "CompShareSDK", FakeSDK)
+    response = api.invoke(
+        Runtime(_profile=Profile("public", "private")),
+        "ListItems",
+        {},
+        list_key="Items",
+        columns=(("Id", "ID"),),
+    )
+
+    assert response == {"Items": None}
+    assert "No results" in capsys.readouterr().out

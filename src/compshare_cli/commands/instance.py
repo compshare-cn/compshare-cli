@@ -44,7 +44,7 @@ Choice = TypeVar("Choice")
 
 
 def _instance_rows(response: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
-    for raw in response.get("UHostSet", []):
+    for raw in response.get("UHostSet") or []:
         row = dict(raw)
         memory = row.get("Memory")
         row["MemoryDisplay"] = f"{memory // 1024}GiB" if isinstance(memory, int) else memory
@@ -57,11 +57,11 @@ def _search_rows(
     available_only: bool = False,
 ) -> Iterable[Dict[str, Any]]:
     inventory = inventory or {}
-    for machine in response.get("AvailableInstanceTypes", []):
-        gpu_memory = machine.get("GraphicsMemory", {}).get("Value")
-        for size in machine.get("MachineSizes", []):
-            for collection in size.get("Collection", []):
-                for memory in collection.get("Memory", []):
+    for machine in response.get("AvailableInstanceTypes") or []:
+        gpu_memory = (machine.get("GraphicsMemory") or {}).get("Value")
+        for size in machine.get("MachineSizes") or []:
+            for collection in size.get("Collection") or []:
+                for memory in collection.get("Memory") or []:
                     stock = inventory.get(machine.get("Name"), {}).get(
                         (size.get("Gpu"), collection.get("Cpu"), memory)
                     )
@@ -75,7 +75,7 @@ def _search_rows(
                         "VRAM": f"{gpu_memory}GiB" if gpu_memory else None,
                         "Zone": machine.get("Zone"),
                         "Stock": stock,
-                        "Platforms": collection.get("MinimalCpuPlatform", []),
+                        "Platforms": collection.get("MinimalCpuPlatform") or [],
                     }
 
 
@@ -153,7 +153,7 @@ def _wait_for_instance(
         if error:
             raise UsageError(str(error["message"]))
         response = response or {}
-        hosts = response.get("UHostSet", [])
+        hosts = response.get("UHostSet") or []
         if absent and not hosts:
             return response
         current = str(hosts[0].get("State", "Unknown")) if hosts else "NotFound"
@@ -211,7 +211,7 @@ def _locate_instances(
             {"Region": region, "UHostIds": list(remaining)},
             "UHostSet",
         )
-        for raw in response.get("UHostSet", []):
+        for raw in response.get("UHostSet") or []:
             host = dict(raw)
             instance = str(host.get("UHostId") or "")
             if instance not in remaining:
@@ -223,7 +223,7 @@ def _locate_instances(
 
 
 def _price_total(price: Dict[str, Any], count: int) -> Optional[Decimal]:
-    details = price.get("PriceDetails", [])
+    details = price.get("PriceDetails") or []
     if not details:
         return None
     values = [details[0].get(key) for key in ("Instance", "Disks", "SystemDisks", "CompShareImage")]
@@ -244,7 +244,7 @@ def _project_id(state: Runtime, explicit: Optional[str]) -> str:
     if explicit:
         return explicit
     response = call(state, "GetProjectList", {})
-    projects = response.get("ProjectSet", [])
+    projects = response.get("ProjectSet") or []
     selected = next((item for item in projects if item.get("IsDefault")), None)
     selected = selected or (projects[0] if projects else None)
     if not selected or not selected.get("ProjectId"):
@@ -270,7 +270,7 @@ def _create_location(
         "DescribeCompShareSupportZone",
         {"Region": state.region},
     )
-    zones = response.get("ZoneInfo", [])
+    zones = response.get("ZoneInfo") or []
     if not zones:
         return selected_region, selected_zone
     default = next(
@@ -302,10 +302,10 @@ def _create_gpu(
         "DescribeAvailableCompShareInstanceTypes",
         {"Region": region, "Zone": zone, "InstanceType": "uhost"},
     )
-    machines = response.get("AvailableInstanceTypes", [])
+    machines = response.get("AvailableInstanceTypes") or []
 
     def label(machine: Dict[str, Any]) -> str:
-        memory = machine.get("GraphicsMemory", {}).get("Value")
+        memory = (machine.get("GraphicsMemory") or {}).get("Value")
         suffix = f" · {memory}GiB VRAM" if memory else ""
         return f"{machine.get('Name')}{suffix}"
 
@@ -346,13 +346,13 @@ def _create_images(
     response = call(state, mapping[selected_source], params)
     if selected_source == "community":
         images = []
-        for group in response.get("CompshareImageGroup", []):
-            for raw in group.get("Data", []):
+        for group in response.get("CompshareImageGroup") or []:
+            for raw in group.get("Data") or []:
                 image = dict(raw)
                 image.setdefault("Name", group.get("ImageName"))
                 images.append(image)
     else:
-        images = list(response.get("ImageSet", []))
+        images = list(response.get("ImageSet") or [])
     return [
         image
         for image in images
@@ -448,7 +448,7 @@ def search(
     if image is not None:
         machine_types = {
             machine.get("Name")
-            for machine in legal.get("AvailableInstanceTypes", [])
+            for machine in legal.get("AvailableInstanceTypes") or []
             if machine.get("Name")
         }
         for machine_type in sorted(machine_types):
@@ -465,12 +465,12 @@ def search(
                 }
             )
             capacity = call(state, "CheckCompShareResourceCapacity", capacity_params)
-            inventory_response[machine_type] = capacity.get("Specs", [])
+            inventory_response[machine_type] = capacity.get("Specs") or []
             inventory[machine_type] = {
                 (spec.get("Gpu"), spec.get("Cpu"), spec.get("Mem")): bool(
                     spec.get("ResourceEnough")
                 )
-                for spec in capacity.get("Specs", [])
+                for spec in capacity.get("Specs") or []
             }
 
     response = dict(legal)
@@ -567,7 +567,7 @@ def list_instances(
             {**params, "Region": current_region},
             "UHostSet",
         )
-        for host in current.get("UHostSet", []):
+        for host in current.get("UHostSet") or []:
             item = dict(host)
             item.setdefault("Region", current_region)
             response["UHostSet"].append(item)
@@ -579,7 +579,7 @@ def list_instances(
         "ChargeType": billing.casefold() if billing else None,
     }
     filtered = []
-    for host in response.get("UHostSet", []):
+    for host in response.get("UHostSet") or []:
         if all(
             expected is None or expected in str(host.get(field, "")).casefold()
             for field, expected in filters.items()
@@ -735,7 +735,7 @@ def create(
     requested_memory = memory_mib(memory) // 1024 if memory is not None else None
     matching = [
         spec
-        for spec in capacity.get("Specs", [])
+        for spec in capacity.get("Specs") or []
         if spec.get("ResourceEnough")
         and (count is None or spec.get("Gpu") == count)
         and (cpu is None or spec.get("Cpu") == cpu)
@@ -1481,7 +1481,7 @@ def refund(ctx: typer.Context, instances: List[str] = typer.Argument(...)) -> No
             "GetCompShareRefundPrice",
             {"Region": region, "Zone": zone, "UHostIds": ids},
         )
-        response["RefundPriceSet"].extend(current.get("RefundPriceSet", []))
+        response["RefundPriceSet"].extend(current.get("RefundPriceSet") or [])
     Renderer(state.json_output).data(
         response,
         rows=response["RefundPriceSet"],

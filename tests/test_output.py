@@ -20,3 +20,9 @@ def test_json_renderer_emits_one_compact_document(capsys) -> None:
     output = capsys.readouterr().out
     assert output.count("\n") == 1
     assert json.loads(output) == {"RetCode": 0, "value": "中文"}
+
+
+def test_table_accepts_no_rows(capsys) -> None:
+    Renderer(False).table(None, (("Id", "ID"),))
+
+    assert capsys.readouterr().out

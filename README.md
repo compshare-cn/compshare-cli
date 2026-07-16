@@ -8,7 +8,7 @@
 - 默认中文帮助，可切换英文；所有命令支持 JSON 输出
 - 基于官方 [`ucloud-sdk-python3`](https://github.com/ucloud/ucloud-sdk-python3)
 
-当前版本：`0.2.0`，要求 Python 3.9 或更高版本。
+当前版本：`0.2.1`，要求 Python 3.9 或更高版本。
 
 ## 安装
 

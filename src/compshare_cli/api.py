@@ -72,7 +72,7 @@ def invoke(
     elif list_key is None and row_builder is None:
         renderer.data(response)
     else:
-        rows = row_builder(response) if row_builder else response.get(list_key or "", [])
+        rows = row_builder(response) if row_builder else response.get(list_key or "") or []
         renderer.data(response, rows=rows, columns=columns)
     return response
 
@@ -164,6 +164,8 @@ def collect_pages(
             remaining -= len(page)
 
         total = response.get("TotalCount")
+        if not isinstance(total, int):
+            total = response.get("Total")
         if not page or len(page) < current_limit:
             break
         if isinstance(total, int) and current_offset >= total:

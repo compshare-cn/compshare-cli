@@ -15,7 +15,7 @@ def region_from_zone(zone: str) -> str:
 
 def supported_locations(state: Runtime) -> list[Dict[str, Any]]:
     response = call(state, "DescribeCompShareSupportZone", {"Region": state.region})
-    return list(response.get("ZoneInfo", []))
+    return list(response.get("ZoneInfo") or [])
 
 
 def supported_regions(state: Runtime) -> list[str]:
@@ -46,7 +46,7 @@ def locate_instance(
             "DescribeCompShareInstance",
             {"Region": region, "UHostIds": [instance], "Limit": 1, "Offset": 0},
         )
-        hosts = response.get("UHostSet", [])
+        hosts = response.get("UHostSet") or []
         if hosts:
             host = dict(hosts[0])
             zone = str(host.get("Zone") or state.zone)
@@ -74,9 +74,9 @@ def locate_disk(
                 "DescribeCompShareInstance",
                 {"Region": region, "Limit": 100, "Offset": offset},
             )
-            hosts = response.get("UHostSet", [])
+            hosts = response.get("UHostSet") or []
             for host in hosts:
-                for disk in host.get("DiskSet", []):
+                for disk in host.get("DiskSet") or []:
                     if disk.get("UDiskId") == disk_id or disk.get("DiskId") == disk_id:
                         return region, str(host.get("Zone") or state.zone), host, disk
             if len(hosts) < 100:

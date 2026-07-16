@@ -30,8 +30,8 @@ IMAGE_COLUMNS = (
 
 
 def _community_rows(response: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
-    for group in response.get("CompshareImageGroup", []):
-        for raw in group.get("Data", []):
+    for group in response.get("CompshareImageGroup") or []:
+        for raw in group.get("Data") or []:
             row = dict(raw)
             row.setdefault("Name", group.get("ImageName"))
             row.setdefault("Status", group.get("Status"))
@@ -165,7 +165,7 @@ def list_images(
         offset=offset,
         limit=None if all_results else limit,
     )
-    rows = _community_rows(response) if grouped else response.get(list_key, [])
+    rows = _community_rows(response) if grouped else response.get(list_key) or []
     Renderer(state.json_output).data(
         response,
         rows=rows,
@@ -196,7 +196,7 @@ def show(
     rows = (
         list(_community_rows(response))
         if source in {"community", "published"}
-        else response.get("ImageSet", [])
+        else response.get("ImageSet") or []
     )
     item = next(
         (row for row in rows if row.get("CompShareImageId") == image),

@@ -49,3 +49,11 @@ def test_money_uses_exact_cents() -> None:
     assert money_cents("123.45") == 12_345
     with pytest.raises(UsageError):
         money("1.001")
+
+
+def test_non_utf8_text_file_has_user_facing_error(tmp_path) -> None:
+    path = tmp_path / "README.md"
+    path.write_bytes(b"\xff\xfe")
+
+    with pytest.raises(UsageError, match="README.md"):
+        parsing.read_text(path)

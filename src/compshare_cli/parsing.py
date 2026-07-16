@@ -106,7 +106,7 @@ def read_text(path: Optional[Path]) -> Optional[str]:
         return None
     try:
         return path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         raise UsageError(tr("Unable to read file {path}: {error}", path=path, error=exc)) from exc
 
 

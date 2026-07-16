@@ -19,8 +19,8 @@ app.add_typer(us3_app, name="us3")
 
 
 def _disk_rows(response: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
-    for instance in response.get("UHostSet", []):
-        for disk in instance.get("DiskSet", []):
+    for instance in response.get("UHostSet") or []:
+        for disk in instance.get("DiskSet") or []:
             row = dict(disk)
             row["UHostId"] = instance.get("UHostId")
             row["Region"] = instance.get("Region")
@@ -57,7 +57,7 @@ def list_disks(
                 {"Region": current_region, "Limit": 100, "Offset": 0},
             )
             response["UHostSet"].extend(
-                {**host, "Region": current_region} for host in current.get("UHostSet", [])
+                {**host, "Region": current_region} for host in current.get("UHostSet") or []
             )
     Renderer(state.json_output).data(
         response,

@@ -115,7 +115,7 @@ def show(ctx: typer.Context, team: int = typer.Argument(..., help="Team ID.")) -
     if state.json_output:
         Renderer(True).data(response)
         return
-    info = response.get("Team", {})
+    info = response.get("Team") or {}
     Renderer(False).details(
         "Team details",
         [
@@ -467,7 +467,7 @@ def list_orders(
     )
     Renderer(state.json_output).data(
         response,
-        rows=response.get("OrderInfos", []),
+        rows=response.get("OrderInfos") or [],
         columns=ORDER_COLUMNS,
     )
 
@@ -533,7 +533,7 @@ def unpaid(
         "Unpaid summary",
         [("COUNT", summary.get("TotalCount")), ("AMOUNT", summary.get("Amount"))],
     )
-    Renderer(False).table(orders.get("OrderInfos", []), ORDER_COLUMNS)
+    Renderer(False).table(orders.get("OrderInfos") or [], ORDER_COLUMNS)
 
 
 @billing_app.command("products", help="List product types used by a team member.")
@@ -641,7 +641,7 @@ def audit(
     )
     Renderer(state.json_output).data(
         response,
-        rows=response.get("Logs", []),
+        rows=response.get("Logs") or [],
         columns=(
             ("CreateTime", "CREATED"),
             ("OperateType", "ACTION"),

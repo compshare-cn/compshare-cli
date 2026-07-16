@@ -5,6 +5,7 @@ from typing import List, Optional
 
 import click
 import typer
+from typer import core as typer_core
 from typer.main import get_command
 
 from compshare_cli import __version__
@@ -15,9 +16,24 @@ from compshare_cli.i18n import configured_language, localize_command, normalize_
 from compshare_cli.output import Renderer
 from compshare_cli.runtime import Runtime
 
+_TYPER_CLICK = getattr(typer_core, "_click", click)
+_TYPER_CLICK_EXCEPTIONS = getattr(_TYPER_CLICK, "exceptions", _TYPER_CLICK)
+_CLICK_EXCEPTIONS = (click.ClickException, _TYPER_CLICK_EXCEPTIONS.ClickException)
+_ABORT_EXCEPTIONS = (click.Abort, _TYPER_CLICK_EXCEPTIONS.Abort)
+
+
+class RootGroup(typer_core.TyperGroup):
+    def list_commands(self, ctx):
+        names = super().list_commands(ctx)
+        if "config" not in names:
+            return names
+        return ["config", *(name for name in names if name != "config")]
+
+
 app = typer.Typer(
     name="compshare",
     help="Manage CompShare GPU compute from the terminal.",
+    cls=RootGroup,
     no_args_is_help=True,
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -198,6 +214,8 @@ def lang(
 
 def main(args: Optional[List[str]] = None) -> None:
     argv = list(sys.argv[1:] if args is None else args)
+    if not argv:
+        argv = ["-h"]
     try:
         language = configured_language()
         command = localize_command(get_command(app), language)
@@ -205,10 +223,10 @@ def main(args: Optional[List[str]] = None) -> None:
     except CLIError as error:
         Renderer("--json" in argv).error(str(error))
         raise SystemExit(2) from error
-    except click.ClickException as error:
+    except _CLICK_EXCEPTIONS as error:
         Renderer("--json" in argv).error(error.format_message())
         raise SystemExit(error.exit_code) from error
-    except click.Abort as error:
+    except _ABORT_EXCEPTIONS as error:
         Renderer("--json" in argv).error(tr("Aborted"))
         raise SystemExit(1) from error
     if isinstance(result, int) and result:

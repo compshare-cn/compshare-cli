@@ -500,7 +500,8 @@ def localize_command(command: click.Command, language: str) -> click.Command:
         return option
 
     command.get_help_option = localized_help_option  # type: ignore[method-assign]
-    if isinstance(command, click.Group):
-        for child in command.commands.values():
+    children = getattr(command, "commands", None)
+    if children is not None:
+        for child in children.values():
             localize_command(child, language)
     return command

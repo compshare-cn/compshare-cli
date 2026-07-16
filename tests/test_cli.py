@@ -1,6 +1,5 @@
 import json
 
-import click
 import pytest
 from typer.main import get_command
 from typer.testing import CliRunner
@@ -30,12 +29,25 @@ def test_help_tree(args) -> None:
 
 def test_global_json_is_accepted_before_command(capsys) -> None:
     cli.main(["--json", "version"])
-    assert json.loads(capsys.readouterr().out) == {"version": "0.1.0"}
+    assert json.loads(capsys.readouterr().out) == {"version": "0.1.3"}
 
 
 def test_global_profile_is_accepted_before_command(capsys) -> None:
     cli.main(["--profile", "testing", "--json", "version"])
-    assert json.loads(capsys.readouterr().out) == {"version": "0.1.0"}
+    assert json.loads(capsys.readouterr().out) == {"version": "0.1.3"}
+
+
+def test_no_args_shows_help_without_error(capsys) -> None:
+    cli.main([])
+    captured = capsys.readouterr()
+    assert "Usage:" in captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_root_help_lists_config_first(capsys) -> None:
+    cli.main(["-h"])
+    help_text = capsys.readouterr().out
+    assert help_text.index("config") < help_text.index("version")
 
 
 def test_global_options_after_command_are_rejected(capsys) -> None:
@@ -107,6 +119,7 @@ def test_lang_command_persists_help_language(monkeypatch, tmp_path, capsys) -> N
     cli.main(["--help"])
     chinese = capsys.readouterr().out
     assert "在终端管理优云智算 GPU 计算资源" in chinese
+    assert "管理 GPU 实例" in chinese
     assert "显示帮助并退出" in chinese
     assert "--install-completion" not in chinese
     assert "--lang" not in chinese
@@ -157,8 +170,9 @@ def test_every_command_has_chinese_and_english_description() -> None:
 
     def descriptions(command, prefix=()):
         result = []
-        if isinstance(command, click.Group):
-            for name, child in command.commands.items():
+        children = getattr(command, "commands", None)
+        if children is not None:
+            for name, child in children.items():
                 path = (*prefix, name)
                 result.append((path, child.help or child.short_help))
                 result.extend(descriptions(child, path))

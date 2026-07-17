@@ -5,6 +5,7 @@ import pytest
 from compshare_cli import parsing
 from compshare_cli.errors import UsageError
 from compshare_cli.parsing import (
+    decode_password,
     disk_gib,
     encode_password,
     memory_mib,
@@ -31,6 +32,9 @@ def test_invalid_sizes_raise_user_facing_errors() -> None:
 
 def test_password_and_timestamp_encoding() -> None:
     assert encode_password("ucloud.cn") == base64.b64encode(b"ucloud.cn").decode("ascii")
+    assert decode_password(encode_password("ucloud.cn")) == "ucloud.cn"
+    assert decode_password("legacy-plaintext") == "legacy-plaintext"
+    assert decode_password(None) is None
     assert timestamp("1970-01-01T08:00:01+08:00") == 1
     assert timestamp("123") == 123
 

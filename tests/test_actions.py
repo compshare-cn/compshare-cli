@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from compshare_cli.actions import (
+    COMING_SOON_ACTIONS,
     IMAGE_ACTIONS,
     INSTANCE_ACTIONS,
     PUBLIC_ACTIONS,
@@ -21,11 +22,17 @@ def test_public_action_counts() -> None:
     assert len(PUBLIC_ACTIONS) == 67
 
 
-def test_every_public_action_is_wired_into_a_command() -> None:
+def test_every_available_public_action_is_wired_into_a_command() -> None:
     command_dir = Path(__file__).parents[1] / "src" / "compshare_cli" / "commands"
     source = "\n".join(path.read_text(encoding="utf-8") for path in command_dir.glob("*.py"))
-    missing = {action for action in PUBLIC_ACTIONS if f'"{action}"' not in source}
+    missing = {
+        action for action in PUBLIC_ACTIONS - COMING_SOON_ACTIONS if f'"{action}"' not in source
+    }
     assert missing == set()
+
+
+def test_coming_soon_actions_are_public() -> None:
+    assert COMING_SOON_ACTIONS <= PUBLIC_ACTIONS
 
 
 @pytest.mark.parametrize(

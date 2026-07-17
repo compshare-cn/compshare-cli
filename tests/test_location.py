@@ -1,36 +1,100 @@
+import pytest
+
 from compshare_cli import location
+from compshare_cli.errors import UsageError
 from compshare_cli.runtime import Runtime
 
 
-def test_region_is_derived_from_zone() -> None:
-    assert location.region_from_zone("cn-sh2-02") == "cn-sh2"
-
-
-def test_instance_location_searches_supported_regions(monkeypatch) -> None:
+def test_instance_location_uses_region_and_zone_from_response(monkeypatch) -> None:
     calls = []
 
     def fake_call(state, action, params):
         calls.append((action, params))
-        if action == "DescribeCompShareSupportZone":
-            return {
-                "ZoneInfo": [
-                    {"Region": "cn-wlcb", "Zone": "cn-wlcb-01"},
-                    {"Region": "cn-sh2", "Zone": "cn-sh2-02"},
-                ]
-            }
-        if params["Region"] == "cn-sh2":
-            return {"UHostSet": [{"UHostId": "uhost-1", "Zone": "cn-sh2-02"}]}
-        return {"UHostSet": []}
+        return {
+            "UHostSet": [
+                {
+                    "UHostId": "uhost-1",
+                    "Region": "cn-sh2",
+                    "Zone": "cn-sh2-02",
+                }
+            ]
+        }
 
     monkeypatch.setattr(location, "call", fake_call)
     region, zone, host = location.locate_instance(Runtime(), "uhost-1")
 
     assert (region, zone, host["UHostId"]) == ("cn-sh2", "cn-sh2-02", "uhost-1")
-    assert [action for action, _ in calls] == [
-        "DescribeCompShareInstance",
-        "DescribeCompShareSupportZone",
-        "DescribeCompShareInstance",
+    assert calls == [
+        (
+            "DescribeCompShareInstance",
+            {"UHostIds": ["uhost-1"], "Limit": 1, "Offset": 0},
+        )
     ]
+
+
+def test_instance_location_does_not_treat_requested_region_as_resolved(monkeypatch) -> None:
+    def fake_call(state, action, params):
+        assert params["Region"] == "cn-wlcb"
+        return {
+            "UHostSet": [
+                {
+                    "UHostId": "uhost-1",
+                    "Region": "cn-sh2",
+                    "Zone": "cn-sh2-02",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(location, "call", fake_call)
+
+    region, zone, _ = location.locate_instance(
+        Runtime(),
+        "uhost-1",
+        request_region="cn-wlcb",
+    )
+
+    assert (region, zone) == ("cn-sh2", "cn-sh2-02")
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        {"UHostId": "uhost-1", "Zone": "cn-sh2-02"},
+        {"UHostId": "uhost-1", "Region": "cn-sh2"},
+    ],
+)
+def test_instance_location_rejects_incomplete_response(monkeypatch, host) -> None:
+    monkeypatch.setattr(location, "call", lambda *args, **kwargs: {"UHostSet": [host]})
+
+    with pytest.raises(UsageError, match="Region.*Zone"):
+        location.locate_instance(Runtime(), "uhost-1")
+
+
+def test_supported_locations_does_not_inject_region(monkeypatch) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append((action, params))
+        return {"ZoneInfo": [{"Region": "cn-sh2", "Zone": "cn-sh2-02"}]}
+
+    monkeypatch.setattr(location, "call", fake_call)
+
+    assert location.supported_locations(Runtime()) == [{"Region": "cn-sh2", "Zone": "cn-sh2-02"}]
+    assert calls == [("DescribeCompShareSupportZone", {})]
+
+
+def test_supported_locations_passes_only_an_explicit_request_region(monkeypatch) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append((action, params))
+        return {"ZoneInfo": []}
+
+    monkeypatch.setattr(location, "call", fake_call)
+
+    location.supported_locations(Runtime(), request_region="cn-sh2")
+
+    assert calls == [("DescribeCompShareSupportZone", {"Region": "cn-sh2"})]
 
 
 def test_supported_locations_accepts_null_list(monkeypatch) -> None:

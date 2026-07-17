@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
 import typer
@@ -13,10 +14,25 @@ from compshare_cli.api import call, call_captured, collect_pages, invoke
 from compshare_cli.commands.common import confirm, confirm_details, request, runtime
 from compshare_cli.errors import UsageError
 from compshare_cli.i18n import tr
-from compshare_cli.location import locate_instance, region_from_zone, supported_regions
+from compshare_cli.location import instance_location, locate_instance, supported_locations
 from compshare_cli.output import Renderer
-from compshare_cli.parsing import compact, disk_gib, encode_password, memory_mib, money, timestamp
+from compshare_cli.parsing import (
+    compact,
+    decode_password,
+    disk_gib,
+    encode_password,
+    memory_mib,
+    money,
+    timestamp,
+)
 from compshare_cli.runtime import Runtime
+from compshare_cli.ssh import (
+    PasswordAutomationUnavailable,
+    connect_with_password,
+    copy_with_password,
+    execute_with_password,
+    scp_upload_command,
+)
 
 app = typer.Typer(help="Manage GPU instances.", no_args_is_help=True)
 ports_app = typer.Typer(help="Manage container port mappings.", no_args_is_help=True)
@@ -127,6 +143,60 @@ def _choose(
         typer.echo(tr("Please enter a number from 1 to {count}.", count=len(choices)), err=True)
 
 
+def _choose_paginated(
+    title: str,
+    choices: Sequence[Choice],
+    label: Callable[[Choice], str],
+    *,
+    page_size: int = 20,
+) -> Choice:
+    if page_size < 1:
+        raise ValueError("page_size must be positive")
+    if len(choices) <= page_size:
+        return _choose(title, choices, label)
+
+    page = 0
+    page_count = (len(choices) + page_size - 1) // page_size
+    while True:
+        start = page * page_size
+        visible = choices[start : start + page_size]
+        typer.echo(
+            "\n"
+            + tr(title)
+            + " · "
+            + tr(
+                "Page {page} of {pages} ({count} items)",
+                page=page + 1,
+                pages=page_count,
+                count=len(choices),
+            )
+        )
+        for index, choice in enumerate(visible, start=1):
+            typer.echo(f"  {index}. {label(choice)}")
+        if page > 0:
+            typer.echo(f"  b. {tr('Previous page')}")
+        if page + 1 < page_count:
+            typer.echo(f"  f. {tr('Next page')}")
+
+        selected = typer.prompt(tr("Select"), default="1").strip().casefold()
+        if selected == "f" and page + 1 < page_count:
+            page += 1
+            continue
+        if selected == "b" and page > 0:
+            page -= 1
+            continue
+        try:
+            selected_index = int(selected)
+        except ValueError:
+            selected_index = 0
+        if 1 <= selected_index <= len(visible):
+            return visible[selected_index - 1]
+        typer.echo(
+            tr("Please enter a listed number, f for next page, or b for previous page."),
+            err=True,
+        )
+
+
 def _wait_enabled(state: Runtime, value: Optional[bool]) -> bool:
     if value is not None:
         return value
@@ -193,32 +263,22 @@ def _locate_instances(
     instances: Sequence[str],
 ) -> Tuple[Dict[str, Tuple[str, str, Dict[str, Any]]], List[str]]:
     requested = list(dict.fromkeys(instances))
-    if len(requested) == 1:
-        try:
-            region, zone, host = locate_instance(state, requested[0])
-        except UsageError:
-            return {}, requested
-        return {requested[0]: (region, zone, host)}, []
-
     remaining = set(requested)
     found: Dict[str, Tuple[str, str, Dict[str, Any]]] = {}
-    for region in supported_regions(state):
-        if not remaining:
-            break
-        response = collect_pages(
-            state,
-            "DescribeCompShareInstance",
-            {"Region": region, "UHostIds": list(remaining)},
-            "UHostSet",
-        )
-        for raw in response.get("UHostSet") or []:
-            host = dict(raw)
-            instance = str(host.get("UHostId") or "")
-            if instance not in remaining:
-                continue
-            zone = str(host.get("Zone") or state.zone)
-            found[instance] = (region, zone, host)
-            remaining.remove(instance)
+    response = collect_pages(
+        state,
+        "DescribeCompShareInstance",
+        {"UHostIds": list(remaining)},
+        "UHostSet",
+    )
+    for raw in response.get("UHostSet") or []:
+        host = dict(raw)
+        instance = str(host.get("UHostId") or "")
+        if instance not in remaining:
+            continue
+        region, zone = instance_location(host, instance)
+        found[instance] = (region, zone, host)
+        remaining.remove(instance)
     return found, [instance for instance in requested if instance in remaining]
 
 
@@ -256,27 +316,24 @@ def _project_id(state: Runtime, explicit: Optional[str]) -> str:
 
 def _create_location(
     state: Runtime,
+    region: Optional[str],
     zone: Optional[str],
     *,
     interactive: bool,
 ) -> Tuple[str, str]:
-    selected_zone = zone or state.zone
-    selected_region = region_from_zone(selected_zone)
-    if not interactive or zone is not None:
-        return selected_region, selected_zone
+    if region is not None and zone is not None:
+        return region, zone
+    if not interactive:
+        raise UsageError(tr("--region and --zone are required for non-interactive create."))
 
-    response = call(
-        state,
-        "DescribeCompShareSupportZone",
-        {"Region": state.region},
-    )
-    zones = response.get("ZoneInfo") or []
-    if not zones:
-        return selected_region, selected_zone
-    default = next(
-        (index for index, item in enumerate(zones, start=1) if item.get("Zone") == selected_zone),
-        1,
-    )
+    zones = [
+        item
+        for item in supported_locations(state, request_region=region)
+        if item.get("Region")
+        and item.get("Zone")
+        and (region is None or item.get("Region") == region)
+        and (zone is None or item.get("Zone") == zone)
+    ]
     selected = _choose(
         "Availability zone",
         zones,
@@ -284,9 +341,8 @@ def _create_location(
             f"{item.get('Describe') or item.get('Zone')} "
             f"({item.get('Region')} / {item.get('Zone')})"
         ),
-        default=default,
     )
-    return selected.get("Region") or selected_region, selected.get("Zone") or selected_zone
+    return str(selected["Region"]), str(selected["Zone"])
 
 
 def _create_gpu(
@@ -340,10 +396,11 @@ def _create_images(
     }
     if selected_source not in mapping:
         raise UsageError(tr("--image-source must be platform, custom, community, or shared."))
-    params: Dict[str, Any] = {"Region": region, "Limit": 100, "Offset": 0}
-    if selected_source == "platform":
+    params: Dict[str, Any] = {"Region": region}
+    if selected_source != "shared":
         params["Zone"] = zone
-    response = call(state, mapping[selected_source], params)
+    list_key = "CompshareImageGroup" if selected_source == "community" else "ImageSet"
+    response = collect_pages(state, mapping[selected_source], params, list_key)
     if selected_source == "community":
         images = []
         for group in response.get("CompshareImageGroup") or []:
@@ -384,14 +441,12 @@ def _create_image(
                 if normalized in str(item.get("Name", "")).casefold()
                 or normalized in str(item.get("CompShareImageId", "")).casefold()
             ]
-    if len(images) > 50:
-        raise UsageError(tr("More than 50 images matched; use a more specific filter."))
 
     def label(item: Dict[str, Any]) -> str:
         author = f" · {item.get('Author')}" if item.get("Author") else ""
         return f"{item.get('Name') or tr('Unnamed')}{author} · {item.get('CompShareImageId')}"
 
-    selected = _choose("Image", images, label)
+    selected = _choose_paginated("Image", images, label)
     return str(selected["CompShareImageId"])
 
 
@@ -416,7 +471,8 @@ def search(
         help="Image ID. When set, check real inventory for every matched GPU type.",
     ),
     available: bool = typer.Option(False, "--available", help="Show only in-stock specs."),
-    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
+    zone: str = typer.Option(..., "--zone", help="Availability zone."),
     platform: str = typer.Option("Auto", "--platform", help="CPU platform for stock checks."),
     charge: Optional[str] = typer.Option(None, "--charge", help="Billing type for stock checks."),
     disk: str = typer.Option("100GiB", "--disk", help="Boot disk size for stock checks."),
@@ -430,13 +486,11 @@ def search(
             tr("--available requires --image because inventory depends on the image and disks.")
         )
     state = runtime(ctx)
-    selected_zone = zone or state.zone
-    selected_region = region_from_zone(selected_zone)
-    params = request(ctx, region_value=selected_region)
+    params = request(ctx, region_value=region)
     params.update(
         compact(
             {
-                "Zone": selected_zone,
+                "Zone": zone,
                 "MachineTypes": gpu,
                 "InstanceType": "spot" if spot else "uhost",
             }
@@ -452,10 +506,10 @@ def search(
             if machine.get("Name")
         }
         for machine_type in sorted(machine_types):
-            capacity_params = request(ctx, region_value=selected_region)
+            capacity_params = request(ctx, region_value=region)
             capacity_params.update(
                 {
-                    "Zone": selected_zone,
+                    "Zone": zone,
                     "GpuType": machine_type,
                     "MachineType": "G",
                     "MinimalCpuPlatform": platform,
@@ -476,7 +530,7 @@ def search(
     response = dict(legal)
     if image is not None:
         response["Inventory"] = inventory_response
-    Renderer(state.json_output).data(
+    Renderer(state.json_output, state.show_sensitive).data(
         response,
         rows=_search_rows(legal, inventory, available),
         columns=(
@@ -493,12 +547,15 @@ def search(
 
 
 @app.command("zones")
-def zones(ctx: typer.Context) -> None:
+def zones(
+    ctx: typer.Context,
+    region: Optional[str] = typer.Option(None, "--region", help="Filter by region."),
+) -> None:
     """List supported regions and availability zones."""
     invoke(
         runtime(ctx),
         "DescribeCompShareSupportZone",
-        request(ctx),
+        request(ctx, region_value=region),
         list_key="ZoneInfo",
         columns=(("Region", "REGION"), ("Zone", "ZONE"), ("Describe", "NAME")),
     )
@@ -542,8 +599,9 @@ def list_instances(
 ) -> None:
     """List instances."""
     state = runtime(ctx)
-    selected_region = region_from_zone(zone) if zone else region
-    params = request(ctx, region_value=selected_region)
+    if zone is not None and region is None:
+        raise UsageError(tr("--zone requires --region."))
+    params = request(ctx, region_value=region)
     params.update(
         compact(
             {
@@ -558,19 +616,12 @@ def list_instances(
             }
         )
     )
-    regions = [selected_region] if selected_region else supported_regions(state)
-    response: Dict[str, Any] = {"UHostSet": [], "RegionSet": regions}
-    for current_region in regions:
-        current = collect_pages(
-            state,
-            "DescribeCompShareInstance",
-            {**params, "Region": current_region},
-            "UHostSet",
+    response = collect_pages(state, "DescribeCompShareInstance", params, "UHostSet")
+    response["RegionSet"] = list(
+        dict.fromkeys(
+            str(host["Region"]) for host in response.get("UHostSet") or [] if host.get("Region")
         )
-        for host in current.get("UHostSet") or []:
-            item = dict(host)
-            item.setdefault("Region", current_region)
-            response["UHostSet"].append(item)
+    )
     response["TotalCount"] = len(response["UHostSet"])
     filters = {
         "Name": name.casefold() if name else None,
@@ -592,7 +643,7 @@ def list_instances(
     result["ReturnedCount"] = len(page)
     result["Offset"] = offset
     result["Limit"] = None if all_results else limit
-    Renderer(state.json_output).data(
+    Renderer(state.json_output, state.show_sensitive).data(
         result,
         rows=_instance_rows(result),
         columns=INSTANCE_COLUMNS,
@@ -604,8 +655,8 @@ def show(ctx: typer.Context, instance: str = typer.Argument(..., help="Instance 
     """Show full instance details."""
     state = runtime(ctx)
     region, zone, host = locate_instance(state, instance)
-    response = {"UHostSet": [host], "ResolvedRegion": region, "ResolvedZone": zone}
-    Renderer(state.json_output).details(
+    response = {"UHostSet": [host]}
+    Renderer(state.json_output, state.show_sensitive).details(
         "Instance details",
         [
             ("ID", host.get("UHostId")),
@@ -620,7 +671,7 @@ def show(ctx: typer.Context, instance: str = typer.Argument(..., help="Instance 
                 else host.get("Memory"),
             ),
             ("REGION", region),
-            ("ZONE", host.get("Zone")),
+            ("ZONE", zone),
             ("CHARGE", host.get("ChargeType")),
             ("IMAGE", host.get("CompShareImageId") or host.get("ImageId")),
             ("Password", host.get("Password")),
@@ -643,6 +694,11 @@ def create(
         None,
         "--image-source",
         help="Image source: platform, custom, community or shared.",
+    ),
+    region: Optional[str] = typer.Option(
+        None,
+        "--region",
+        help="Region for this request.",
     ),
     zone: Optional[str] = typer.Option(
         None,
@@ -684,16 +740,16 @@ def create(
 ) -> None:
     """Create instances interactively, or use explicit options for automation."""
     state = runtime(ctx)
-    interactive = any(value is None for value in (gpu, count, cpu, memory, image))
+    interactive = any(value is None for value in (gpu, count, cpu, memory, image, region, zone))
     if interactive and state.json_output:
         raise UsageError(
             tr(
                 "JSON mode cannot start the interactive wizard; pass --gpu, --count, --cpu, "
-                "--memory, and --image."
+                "--memory, --image, --region, and --zone."
             )
         )
 
-    region, selected_zone = _create_location(state, zone, interactive=interactive)
+    region, selected_zone = _create_location(state, region, zone, interactive=interactive)
     resolved_gpu = _create_gpu(state, region, selected_zone, gpu)
     resolved_image = _create_image(
         state,
@@ -742,7 +798,7 @@ def create(
         and (requested_memory is None or spec.get("Mem") == requested_memory)
     ]
     if not matching:
-        Renderer(state.json_output).error(
+        Renderer(state.json_output, state.show_sensitive).error(
             tr(
                 "No inventory is available for the selected GPU, CPU, memory, image, billing, "
                 "and disk combination."
@@ -838,7 +894,7 @@ def create(
         "request": create_params,
     }
     if dry_run:
-        Renderer(state.json_output).details(
+        Renderer(state.json_output, state.show_sensitive).details(
             "Create plan",
             [
                 ("ZONE", selected_zone),
@@ -885,7 +941,7 @@ def create(
         result["final"] = [
             _wait_for_instance(state, item, region=region, timeout=timeout) for item in ids
         ]
-    Renderer(state.json_output).details(
+    Renderer(state.json_output, state.show_sensitive).details(
         "Operation completed",
         [
             ("INSTANCE", ids),
@@ -934,7 +990,7 @@ def _lifecycle(
             absent=absent,
             timeout=timeout,
         )
-    Renderer(state.json_output).success(tr("Operation completed"), result)
+    Renderer(state.json_output, state.show_sensitive).success(tr("Operation completed"), result)
 
 
 def _render_batch(
@@ -960,7 +1016,7 @@ def _render_batch(
         }
         for item in failed
     )
-    Renderer(state.json_output).data(
+    Renderer(state.json_output, state.show_sensitive).data(
         payload,
         rows=rows,
         columns=(("UHostId", "INSTANCE"), ("Status", "STATUS"), ("Message", "MESSAGE")),
@@ -1001,7 +1057,7 @@ def _batch_lifecycle(
             "instance": instance,
             "error": {
                 "message": tr(
-                    "Instance {instance} was not found in any supported region.",
+                    "Instance {instance} was not found.",
                     instance=instance,
                 )
             },
@@ -1165,7 +1221,7 @@ def wait_for_instances(
             "instance": instance,
             "error": {
                 "message": tr(
-                    "Instance {instance} was not found in any supported region.",
+                    "Instance {instance} was not found.",
                     instance=instance,
                 )
             },
@@ -1333,7 +1389,8 @@ def resize(
                 {"UHostId": instance, "CPU": cpu, "Memory": memory_mib(memory or ""), "GPU": gpu}
             )
             quote = call(runtime(ctx), "GetCompShareInstanceUpgradePrice", quote_params)
-        Renderer(runtime(ctx).json_output).details(
+        state = runtime(ctx)
+        Renderer(state.json_output, state.show_sensitive).details(
             "Operation plan",
             [("INSTANCE", instance), ("ACTION", "Resize"), ("REQUEST", params), ("PRICE", quote)],
             response={"dry_run": True, "instance": instance, "request": params, "price": quote},
@@ -1368,10 +1425,10 @@ def price(
     ),
     image: Optional[str] = typer.Option(None, help="Image ID for image pricing."),
     quantity: int = typer.Option(1, min=1, help="Billing duration for prepaid modes."),
-    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
+    zone: str = typer.Option(..., "--zone", help="Availability zone."),
 ) -> None:
-    selected_zone = zone or runtime(ctx).zone
-    params = request(ctx, zone=True, zone_value=selected_zone)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params.update(
         compact(
             {
@@ -1437,10 +1494,10 @@ def billing(
     cpu: int = typer.Option(..., help="CPU core count."),
     memory: str = typer.Option(..., help="Memory, for example 64GiB."),
     charge: Optional[str] = typer.Option(None, help="Billing type."),
-    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
+    zone: str = typer.Option(..., "--zone", help="Availability zone."),
 ) -> None:
-    selected_zone = zone or runtime(ctx).zone
-    params = request(ctx, zone=True, zone_value=selected_zone)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params.update(
         compact(
             {
@@ -1482,7 +1539,7 @@ def refund(ctx: typer.Context, instances: List[str] = typer.Argument(...)) -> No
             {"Region": region, "Zone": zone, "UHostIds": ids},
         )
         response["RefundPriceSet"].extend(current.get("RefundPriceSet") or [])
-    Renderer(state.json_output).data(
+    Renderer(state.json_output, state.show_sensitive).data(
         response,
         rows=response["RefundPriceSet"],
         columns=(
@@ -1496,19 +1553,14 @@ def refund(ctx: typer.Context, instances: List[str] = typer.Argument(...)) -> No
 
 @app.command(
     "monitor",
-    help="Get instance monitoring data (currently unavailable in production).",
+    help="Get instance monitoring data (coming soon).",
 )
 def monitor(
     ctx: typer.Context,
     instances: Optional[List[str]] = typer.Argument(None),
     region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
 ) -> None:
-    state = runtime(ctx)
-    if not region and instances:
-        region, _, _ = locate_instance(state, instances[0])
-    params = request(ctx, region_value=region)
-    params.update(compact({"UHostIds": instances}))
-    invoke(state, "GetCompShareInstanceMonitor", params)
+    raise UsageError(tr("Instance monitoring is coming soon."))
 
 
 @app.command("charge", help="Change an instance billing type.")
@@ -1524,7 +1576,8 @@ def charge(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     if dry_run:
-        Renderer(runtime(ctx).json_output).details(
+        state = runtime(ctx)
+        Renderer(state.json_output, state.show_sensitive).details(
             "Operation plan",
             [("INSTANCE", instance), ("CHARGE", destination)],
             response={"dry_run": True, "instance": instance, "destination": destination},
@@ -1543,12 +1596,13 @@ def charge(
 @app.command("network", help="Check network accelerator status.")
 def network(
     ctx: typer.Context,
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
+    zone: str = typer.Option(..., "--zone", help="Availability zone."),
 ) -> None:
     invoke(
         runtime(ctx),
         "CheckCompShareNetOptimizer",
-        request(ctx, region_value=region),
+        request(ctx, zone=True, region_value=region, zone_value=zone),
     )
 
 
@@ -1557,9 +1611,10 @@ def models(
     ctx: typer.Context,
     name: Optional[str] = typer.Option(None, help="Filter by model name."),
     tags: Optional[str] = typer.Option(None, help="Filter by model tags."),
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
+    zone: str = typer.Option(..., "--zone", help="Availability zone."),
 ) -> None:
-    params = request(ctx, region_value=region)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params.update(compact({"name": name, "tags": tags}))
     invoke(
         runtime(ctx),
@@ -1579,7 +1634,7 @@ def models(
 @ports_app.command("list", help="List supported software ports.")
 def list_ports(
     ctx: typer.Context,
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
 ) -> None:
     invoke(
         runtime(ctx),
@@ -1666,7 +1721,7 @@ def cancel_schedule(
 @software_app.command("list", help="List supported instance software.")
 def list_software(
     ctx: typer.Context,
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
 ) -> None:
     invoke(
         runtime(ctx),
@@ -1693,26 +1748,57 @@ def software_url(ctx: typer.Context, instance: str, software: str) -> None:
 def ssh(
     ctx: typer.Context,
     instance: str,
+    remote_command: Optional[List[str]] = typer.Argument(
+        None,
+        help="Remote command and arguments; use -- before command options.",
+    ),
     print_only: bool = typer.Option(False, "--print", help="Print instead of executing SSH."),
+    auto_password: bool = typer.Option(
+        True,
+        "--auto-password/--no-auto-password",
+        help="Automatically enter the password returned by the API.",
+    ),
 ) -> None:
     state = runtime(ctx)
     region, zone, host = locate_instance(state, instance)
     command = host.get("SshLoginCommand")
-    password = host.get("Password")
+    raw_password = host.get("Password")
+    password = decode_password(str(raw_password)) if raw_password is not None else None
     if not command:
         raise UsageError(tr("Instance {instance} has no SSH login command.", instance=instance))
+    argv = [*shlex.split(command), *(remote_command or [])]
     if print_only or state.json_output:
-        Renderer(state.json_output).data(
+        Renderer(state.json_output, state.show_sensitive).data(
             {
                 "instance": instance,
-                "command": command,
+                "command": command
+                if not remote_command
+                else f"{command} {shlex.join(remote_command)}",
                 "password": password,
             }
         )
         return
-    if password:
+    if password and state.show_sensitive:
         typer.echo(f"Password: {password}")
-    else:
+    if password and auto_password:
+        try:
+            if remote_command:
+                exit_code = execute_with_password(argv, str(password))
+            else:
+                exit_code = connect_with_password(argv, str(password))
+        except PasswordAutomationUnavailable:
+            typer.echo(
+                tr(
+                    "Automatic password entry is unavailable in this terminal; "
+                    "continuing with standard SSH."
+                ),
+                err=True,
+            )
+        else:
+            raise typer.Exit(exit_code)
+    if password and not state.show_sensitive:
+        typer.echo(tr("Password hidden; rerun with --show-sensitive to display it."))
+    elif not password:
         typer.echo(
             tr(
                 "The API did not return a password. Run `compshare instance password {instance}` "
@@ -1720,5 +1806,71 @@ def ssh(
                 instance=instance,
             )
         )
-    argv = shlex.split(command)
+    raise typer.Exit(subprocess.call(argv))
+
+
+@app.command("scp", help="Copy a local file or directory to an instance.")
+def scp(
+    ctx: typer.Context,
+    instance: str,
+    local_path: str = typer.Argument(..., help="Local file or directory."),
+    remote_path: str = typer.Argument(..., help="Destination path on the instance."),
+    print_only: bool = typer.Option(False, "--print", help="Print instead of copying."),
+    auto_password: bool = typer.Option(
+        True,
+        "--auto-password/--no-auto-password",
+        help="Automatically enter the password returned by the API.",
+    ),
+) -> None:
+    source = Path(local_path).expanduser()
+    if not source.exists():
+        raise UsageError(tr("Local path {path} does not exist.", path=local_path))
+
+    state = runtime(ctx)
+    _, _, host = locate_instance(state, instance)
+    login_command = host.get("SshLoginCommand")
+    raw_password = host.get("Password")
+    password = decode_password(str(raw_password)) if raw_password is not None else None
+    if not login_command:
+        raise UsageError(tr("Instance {instance} has no SSH login command.", instance=instance))
+    try:
+        argv = scp_upload_command(
+            shlex.split(str(login_command)),
+            str(source.resolve()),
+            remote_path,
+            recursive=source.is_dir(),
+        )
+    except ValueError as exc:
+        raise UsageError(tr("The instance SSH login command cannot be used for SCP.")) from exc
+
+    if print_only or state.json_output:
+        Renderer(state.json_output, state.show_sensitive).data(
+            {
+                "instance": instance,
+                "command": shlex.join(argv),
+            }
+        )
+        return
+    if password and state.show_sensitive:
+        typer.echo(f"Password: {password}")
+    if password and auto_password:
+        try:
+            exit_code = copy_with_password(argv, str(password))
+        except PasswordAutomationUnavailable:
+            typer.echo(
+                tr("Automatic password entry is unavailable; continuing with standard SCP."),
+                err=True,
+            )
+        else:
+            raise typer.Exit(exit_code)
+    if password and not state.show_sensitive:
+        typer.echo(tr("Password hidden; rerun with --show-sensitive to display it."))
+    elif not password:
+        typer.echo(
+            tr(
+                "The API did not return a password. Run `compshare instance password {instance}` "
+                "to set one.",
+                instance=instance,
+            )
+        )
     raise typer.Exit(subprocess.call(argv))

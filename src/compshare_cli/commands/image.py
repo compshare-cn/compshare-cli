@@ -11,7 +11,7 @@ from compshare_cli.api import call, collect_pages, invoke
 from compshare_cli.commands.common import confirm, request, runtime
 from compshare_cli.errors import UsageError
 from compshare_cli.i18n import tr
-from compshare_cli.location import locate_instance, region_from_zone
+from compshare_cli.location import locate_instance
 from compshare_cli.output import Renderer
 from compshare_cli.parsing import compact, read_base64, read_text, split_csv
 
@@ -27,6 +27,22 @@ IMAGE_COLUMNS = (
     ("VersionName", "VERSION"),
     ("Tags", "TAGS"),
 )
+
+_ZONE_SCOPED_SOURCES = {"platform", "custom", "community", "published", "user"}
+
+
+def _require_image_location(
+    source: str,
+    region: Optional[str],
+    zone: Optional[str],
+) -> Tuple[str, Optional[str]]:
+    if region is None:
+        raise UsageError(tr("--region is required for image source {source}.", source=source))
+    if source in _ZONE_SCOPED_SOURCES and zone is None:
+        raise UsageError(
+            tr("--region and --zone are required for image source {source}.", source=source)
+        )
+    return region, zone
 
 
 def _community_rows(response: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
@@ -150,12 +166,11 @@ def list_images(
                 options=", ".join(unsupported),
             )
         )
-    selected_zone = zone or runtime(ctx).zone
-    selected_region = region_from_zone(selected_zone) if source == "platform" else region
-    params = request(ctx, region_value=selected_region)
+    region, zone = _require_image_location(source, region, zone)
+    params = request(ctx, region_value=region)
     params.update(filters)
-    if source == "platform":
-        params["Zone"] = selected_zone
+    if source in _ZONE_SCOPED_SOURCES:
+        params["Zone"] = zone
     state = runtime(ctx)
     response = collect_pages(
         state,
@@ -166,7 +181,7 @@ def list_images(
         limit=None if all_results else limit,
     )
     rows = _community_rows(response) if grouped else response.get(list_key) or []
-    Renderer(state.json_output).data(
+    Renderer(state.json_output, state.show_sensitive).data(
         response,
         rows=rows,
         columns=IMAGE_COLUMNS,
@@ -185,12 +200,11 @@ def show(
     if source not in {"platform", "custom", "community", "shared", "published"}:
         raise UsageError(tr("Image source {source} cannot be queried by ID.", source=source))
     action, _, _ = _source(source)
-    selected_zone = zone or runtime(ctx).zone
-    selected_region = region_from_zone(selected_zone) if source == "platform" else region
-    params = request(ctx, region_value=selected_region)
+    region, zone = _require_image_location(source, region, zone)
+    params = request(ctx, region_value=region)
     params["CompShareImageId"] = image
-    if source == "platform":
-        params["Zone"] = selected_zone
+    if source in _ZONE_SCOPED_SOURCES:
+        params["Zone"] = zone
     state = runtime(ctx)
     response = call(state, action, params)
     rows = (
@@ -204,7 +218,7 @@ def show(
     )
     if not item:
         raise UsageError(tr("Image {image} was not found.", image=image))
-    Renderer(state.json_output).details(
+    Renderer(state.json_output, state.show_sensitive).details(
         "Image details",
         [
             ("ID", item.get("CompShareImageId")),
@@ -284,17 +298,19 @@ def create(
                     )
                 )
             time.sleep(5)
-    Renderer(state.json_output).success(tr("Creating image {name}", name=name), result)
+    Renderer(state.json_output, state.show_sensitive).success(
+        tr("Creating image {name}", name=name), result
+    )
 
 
 @app.command("progress", help="Get custom image creation progress.")
 def progress(
     ctx: typer.Context,
     image: str,
-    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
+    zone: str = typer.Option(..., "--zone", help="Availability zone."),
 ) -> None:
-    selected_zone = zone or runtime(ctx).zone
-    params = request(ctx, zone=True, zone_value=selected_zone)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params["CompShareImageId"] = image
     invoke(runtime(ctx), "GetCompShareImageCreateProgress", params)
 
@@ -325,7 +341,8 @@ def update(
     autostart: Optional[bool] = typer.Option(
         None, "--autostart/--no-autostart", help="Whether the image supports automatic startup."
     ),
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
+    zone: str = typer.Option(..., "--zone", help="Availability zone."),
 ) -> None:
     values = compact(
         {
@@ -345,7 +362,7 @@ def update(
     )
     if not values:
         raise UsageError(tr("Specify at least one field to update."))
-    params = request(ctx, region_value=region)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params.update({"CompShareImageId": image, **values})
     invoke(
         runtime(ctx),
@@ -359,12 +376,12 @@ def update(
 def delete(
     ctx: typer.Context,
     image: str,
-    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
+    zone: str = typer.Option(..., "--zone", help="Availability zone."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     confirm(tr("Permanently delete custom image {image}?", image=image), yes)
-    selected_zone = zone or runtime(ctx).zone
-    params = request(ctx, zone=True, zone_value=selected_zone)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params["CompShareImageId"] = image
     invoke(
         runtime(ctx),
@@ -378,7 +395,7 @@ def delete(
 def shares(
     ctx: typer.Context,
     image: str,
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
 ) -> None:
     params = request(ctx, region_value=region)
     params["CompShareImageId"] = image
@@ -397,7 +414,7 @@ def _share(
     accounts: List[int],
     *,
     remove: bool,
-    region: Optional[str],
+    region: str,
 ) -> None:
     params = request(ctx, region_value=region)
     params["CompShareImageId"] = image
@@ -415,7 +432,7 @@ def share(
     ctx: typer.Context,
     image: str,
     accounts: List[int] = typer.Argument(...),
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
 ) -> None:
     _share(ctx, image, accounts, remove=False, region=region)
 
@@ -425,7 +442,7 @@ def unshare(
     ctx: typer.Context,
     image: str,
     accounts: List[int] = typer.Argument(...),
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     confirm(
@@ -458,14 +475,15 @@ def publish(
     autostart: Optional[bool] = typer.Option(
         None, "--autostart/--no-autostart", help="Whether the image supports automatic startup."
     ),
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    region: str = typer.Option(..., "--region", help="Region for this request."),
+    zone: str = typer.Option(..., "--zone", help="Availability zone."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     confirm(
         tr("Publish image {image} as community version {version}?", image=image, version=version),
         yes,
     )
-    params = request(ctx, region_value=region)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone)
     params.update(
         compact(
             {
@@ -496,9 +514,8 @@ def publish(
 def favorite(
     ctx: typer.Context,
     image: str,
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
 ) -> None:
-    params = request(ctx, region_value=region)
+    params = request(ctx)
     params["CompShareImageId"] = image
     invoke(
         runtime(ctx),
@@ -512,9 +529,8 @@ def favorite(
 def unfavorite(
     ctx: typer.Context,
     image: str,
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
 ) -> None:
-    params = request(ctx, region_value=region)
+    params = request(ctx)
     params["CompShareImageId"] = image
     invoke(
         runtime(ctx),
@@ -525,12 +541,9 @@ def unfavorite(
 
 
 @app.command("tags", help="List available image tags.")
-def tags(
-    ctx: typer.Context,
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
-) -> None:
+def tags(ctx: typer.Context) -> None:
     invoke(
         runtime(ctx),
         "DescribeCompShareImageTags",
-        request(ctx, region_value=region),
+        request(ctx),
     )

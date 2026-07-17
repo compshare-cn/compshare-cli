@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from ucloud.client import Client
 from ucloud.core import exc as ucloud_exc
@@ -17,7 +17,7 @@ class CompShareSDK:
     lag behind the public API and silently discard newer fields.
     """
 
-    def __init__(self, profile: Profile, region: str) -> None:
+    def __init__(self, profile: Profile, region: Optional[str] = None) -> None:
         logger = logging.getLogger("compshare_cli.ucloud")
         logger.handlers.clear()
         logger.addHandler(logging.NullHandler())

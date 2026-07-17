@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "compshare-cli"
-version = "0.2.1"
+version = "0.3.0"
 description = "Command-line client for CompShare GPU compute"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -15,6 +15,7 @@ authors = [
 ]
 dependencies = [
   "click>=8.1,<9",
+  "pexpect>=4.9,<5; platform_system != 'Windows'",
   "rich>=13,<15",
   "typer>=0.12,<1",
   "ucloud-sdk-python3>=0.11.103,<0.12",
@@ -36,6 +37,7 @@ dev = [
 
 [project.scripts]
 compshare = "compshare_cli.cli:main"
+compshare-ssh-askpass = "compshare_cli.ssh:askpass"
 
 [tool.setuptools.packages.find]
 where = ["src"]

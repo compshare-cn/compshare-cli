@@ -12,16 +12,53 @@ from rich.table import Table
 from compshare_cli.i18n import tr
 
 SENSITIVE_KEYS = {
+    "authorization",
+    "command",
+    "cookie",
+    "eip",
+    "filebrowserpassword",
+    "hostip",
+    "ip",
+    "ipaddress",
+    "ipaddr",
+    "ipv4",
+    "ipv6",
+    "logincommand",
+    "password",
+    "privateip",
     "privatekey",
-    "private_key",
+    "publicip",
+    "secret",
+    "secretkey",
+    "ssh",
+    "sshcommand",
+    "sshlogincommand",
+    "token",
+    "url",
 }
 
 
-def sanitized(value: Any) -> Any:
+def _normalized_key(key: Any) -> str:
+    return "".join(character for character in str(key).casefold() if character.isalnum())
+
+
+def _is_sensitive_key(key: Any) -> bool:
+    normalized = _normalized_key(key)
+    return (
+        normalized in SENSITIVE_KEYS
+        or normalized.endswith("password")
+        or normalized.endswith("secret")
+        or normalized.endswith("token")
+        or normalized.endswith("url")
+    )
+
+
+def sanitized(value: Any, *, show_sensitive: bool = False) -> Any:
+    if show_sensitive:
+        return value
     if isinstance(value, dict):
         return {
-            key: "***" if key.casefold() in SENSITIVE_KEYS else sanitized(item)
-            for key, item in value.items()
+            key: "***" if _is_sensitive_key(key) else sanitized(item) for key, item in value.items()
         }
     if isinstance(value, list):
         return [sanitized(item) for item in value]
@@ -29,8 +66,9 @@ def sanitized(value: Any) -> Any:
 
 
 class Renderer:
-    def __init__(self, json_output: bool) -> None:
+    def __init__(self, json_output: bool, show_sensitive: bool = False) -> None:
         self.json_output = json_output
+        self.show_sensitive = show_sensitive
         self.console = Console()
 
     def data(
@@ -40,7 +78,7 @@ class Renderer:
         rows: Optional[Iterable[Dict[str, Any]]] = None,
         columns: Optional[Sequence[Tuple[str, str]]] = None,
     ) -> None:
-        safe = sanitized(response)
+        safe = sanitized(response, show_sensitive=self.show_sensitive)
         if self.json_output:
             sys.stdout.write(json.dumps(safe, ensure_ascii=False, separators=(",", ":")) + "\n")
             return
@@ -88,7 +126,7 @@ class Renderer:
             return
         grid = Table.grid(padding=(0, 2))
         grid.add_column(style="bold cyan", no_wrap=True)
-        grid.add_column()
+        grid.add_column(overflow="fold")
         for label, value in fields:
             grid.add_row(tr(label), self._cell(value, key=label))
         self.console.print(Panel(grid, title=tr(title), border_style="blue"))
@@ -97,19 +135,27 @@ class Renderer:
         if self.json_output:
             payload: Dict[str, Any] = {"ok": False, "error": message}
             if details:
-                payload["details"] = sanitized(details)
+                payload["details"] = sanitized(
+                    details,
+                    show_sensitive=self.show_sensitive,
+                )
             sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
         else:
             Console(stderr=True).print(f"[red]{tr('Error')}:[/red] {message}")
 
-    @staticmethod
-    def _cell(value: Any, *, key: Optional[str] = None) -> str:
+    def _cell(self, value: Any, *, key: Optional[str] = None) -> str:
         if value is None:
             return "-"
+        if key and not self.show_sensitive and _is_sensitive_key(key):
+            return "***"
         if isinstance(value, bool):
             return tr("yes") if value else tr("no")
         if isinstance(value, (dict, list)):
-            return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            return json.dumps(
+                sanitized(value, show_sensitive=self.show_sensitive),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
         if key and "time" in key.casefold() and isinstance(value, (int, float)):
             return datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M:%S")
         if key and key.casefold() in {"state", "status"}:

@@ -6,8 +6,9 @@ import typer
 
 from compshare_cli.api import call, invoke
 from compshare_cli.commands.common import confirm, request, runtime
+from compshare_cli.errors import UsageError
 from compshare_cli.i18n import tr
-from compshare_cli.location import locate_disk, locate_instance, region_from_zone, supported_regions
+from compshare_cli.location import locate_disk, locate_instance
 from compshare_cli.output import Renderer
 from compshare_cli.parsing import compact, disk_gib
 
@@ -41,25 +42,23 @@ def list_disks(
         resolved_region, _, host = locate_instance(
             state,
             instance,
-            preferred_region=region,
+            request_region=region,
         )
         response: Dict[str, Any] = {
-            "UHostSet": [{**host, "Region": resolved_region}],
+            "UHostSet": [host],
             "RegionSet": [resolved_region],
         }
     else:
-        regions = [region] if region else supported_regions(state)
-        response = {"UHostSet": [], "RegionSet": regions}
-        for current_region in regions:
-            current = call(
-                state,
-                "DescribeCompShareInstance",
-                {"Region": current_region, "Limit": 100, "Offset": 0},
+        params: Dict[str, Any] = {"Limit": 100, "Offset": 0}
+        if region is not None:
+            params["Region"] = region
+        response = call(state, "DescribeCompShareInstance", params)
+        response["RegionSet"] = list(
+            dict.fromkeys(
+                str(host["Region"]) for host in response.get("UHostSet") or [] if host.get("Region")
             )
-            response["UHostSet"].extend(
-                {**host, "Region": current_region} for host in current.get("UHostSet") or []
-            )
-    Renderer(state.json_output).data(
+        )
+    Renderer(state.json_output, state.show_sensitive).data(
         response,
         rows=_disk_rows(response),
         columns=(
@@ -204,15 +203,18 @@ def resize_disk(
     disk: str,
     size: str = typer.Option(..., help="Target disk size, for example 200GiB."),
     instance: Optional[str] = typer.Option(None, "--instance", help="Attached instance ID."),
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
     zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     confirm(tr("Resize disk {disk} to {size}? Disks cannot be shrunk.", disk=disk, size=size), yes)
     state = runtime(ctx)
+    if (region is None) != (zone is None):
+        raise UsageError(tr("--region and --zone must be provided together."))
     if instance:
         region, resolved_zone, _ = locate_instance(state, instance)
-    elif zone:
-        region, resolved_zone = region_from_zone(zone), zone
+    elif region is not None and zone is not None:
+        resolved_zone = zone
     else:
         region, resolved_zone, host, _ = locate_disk(state, disk)
         instance = str(host.get("UHostId")) if host else None
@@ -235,13 +237,16 @@ def resize_disk(
 def delete_disk(
     ctx: typer.Context,
     disk: str,
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
     zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     confirm(tr("Permanently delete disk {disk} and all its data?", disk=disk), yes)
     state = runtime(ctx)
-    if zone:
-        region, resolved_zone = region_from_zone(zone), zone
+    if (region is None) != (zone is None):
+        raise UsageError(tr("--region and --zone must be provided together."))
+    if region is not None and zone is not None:
+        resolved_zone = zone
     else:
         region, resolved_zone, _, _ = locate_disk(state, disk)
     params = request(

@@ -14,9 +14,6 @@ def test_profile_round_trip_and_file_permissions(monkeypatch, tmp_path) -> None:
         "COMPSHARE_PROFILE",
         "COMPSHARE_PUBLIC_KEY",
         "COMPSHARE_PRIVATE_KEY",
-        "COMPSHARE_REGION",
-        "COMPSHARE_ZONE",
-        "COMPSHARE_PROJECT_ID",
     ):
         monkeypatch.delenv(name, raising=False)
     path = tmp_path / "config.json"
@@ -101,16 +98,8 @@ def test_failed_config_replace_removes_temporary_file(monkeypatch, tmp_path) -> 
     assert list(tmp_path.glob(".*.tmp")) == []
 
 
-def test_runtime_location_is_independent_from_credentials(monkeypatch) -> None:
-    monkeypatch.delenv("COMPSHARE_REGION", raising=False)
-    monkeypatch.delenv("COMPSHARE_ZONE", raising=False)
-    monkeypatch.setenv("COMPSHARE_ZONE", "cn-sh2-02")
+def test_runtime_does_not_own_request_location() -> None:
     state = Runtime()
-    assert state.region == "cn-sh2"
-    assert state.zone == "cn-sh2-02"
 
-    monkeypatch.setenv("COMPSHARE_REGION", "cn-bj2")
-    monkeypatch.setenv("COMPSHARE_ZONE", "cn-bj2-03")
-    state = Runtime()
-    assert state.region == "cn-bj2"
-    assert state.zone == "cn-bj2-03"
+    assert not hasattr(state, "region")
+    assert not hasattr(state, "zone")

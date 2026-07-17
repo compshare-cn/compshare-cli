@@ -87,7 +87,7 @@ def run(state: Runtime) -> None:
         response, error = call_captured(
             state,
             "DescribeCompShareSupportZone",
-            {"Region": state.region},
+            {},
         )
         if error:
             checks.append(_check("API", "Failed", str(error.get("message"))))
@@ -115,7 +115,7 @@ def run(state: Runtime) -> None:
 
     ok = not any(item["Status"] == "Failed" for item in checks)
     payload = {"ok": ok, "checks": checks}
-    Renderer(state.json_output).data(
+    Renderer(state.json_output, state.show_sensitive).data(
         payload,
         rows=checks,
         columns=(("Check", "CHECK"), ("Status", "STATUS"), ("Detail", "DETAIL")),

@@ -13,6 +13,9 @@ DEFAULT_LANGUAGE = "zh"
 ZH_TRANSLATIONS: Dict[str, str] = {
     "Manage CompShare GPU compute from the terminal.": "在终端管理优云智算 GPU 计算资源。",
     "Emit machine-readable JSON.": "输出机器可读的 JSON。",
+    "Show passwords, IP addresses, access URLs, and login commands.": (
+        "显示密码、IP 地址、访问 URL 和登录命令。"
+    ),
     "Credential profile.": "凭证配置名称。",
     "Credential profile name.": "凭证配置的名称。",
     "API public key.": "API 公钥。",
@@ -27,6 +30,8 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Language: zh or en.": "语言：zh 或 en。",
     "Save a CompShare API credential profile.": "保存优云智算 API 凭证配置。",
     "Print the CLI version.": "显示 CLI 版本。",
+    "Ask a CompShare product question.": "询问优云智算产品问题。",
+    "Question to answer.": "需要回答的问题。",
     "Manage GPU instances.": "管理 GPU 实例。",
     "Search legal specifications and, with --image, real inventory.": (
         "查询合法规格；指定 --image 时检查真实库存。"
@@ -79,15 +84,22 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Query current instance pricing.": "查询实例当前计费价格。",
     "Query instance refund amounts.": "查询实例退款金额。",
     "Get instance monitoring data.": "获取实例监控数据。",
-    "Get instance monitoring data (currently unavailable in production).": (
-        "获取实例监控数据（生产环境当前不可用）。"
-    ),
+    "Get instance monitoring data (coming soon).": "获取实例监控数据（待上线）。",
+    "Instance monitoring is coming soon.": "实例监控功能待上线。",
     "Change an instance billing type.": "变更实例计费方式。",
     "Check network accelerator status.": "检查网络加速状态。",
     "List models in the model repository.": "列出模型仓库中的模型。",
     "Shared storage as SIZE[:TYPE]; repeatable.": "共享存储，格式为 SIZE[:TYPE]，可重复指定。",
     "Month, Day, Dynamic or Postpay.": "目标计费方式：Month、Day、Dynamic 或 Postpay。",
     "Print instead of executing SSH.": "只显示 SSH 命令，不执行连接。",
+    "Automatically enter the password returned by the API.": "自动填写 API 返回的登录密码。",
+    "Remote command and arguments; use -- before command options.": (
+        "要在实例中执行的命令及参数；命令包含选项时请先使用 -- 分隔。"
+    ),
+    "Copy a local file or directory to an instance.": "将本地文件或目录复制到实例。",
+    "Local file or directory.": "本地文件或目录。",
+    "Destination path on the instance.": "实例内的目标路径。",
+    "Print instead of copying.": "只显示 SCP 命令，不执行复制。",
     "Open or print an instance SSH command.": "连接实例 SSH，或仅显示 SSH 命令。",
     "Manage container port mappings.": "管理容器端口映射。",
     "List supported software ports.": "列出平台支持的软件端口。",
@@ -245,9 +257,18 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     ),
     "Operation submitted": "操作已提交",
     "Operation completed": "操作已完成",
+    "Answer": "回答",
+    "ANSWER": "答案",
+    "SOURCES": "来源",
     "No selectable options": "没有可选项",
     "Automatically selected the only option.": "已自动选择唯一选项。",
     "Please enter a number from 1 to {count}.": "请输入 1 到 {count} 之间的数字。",
+    "Page {page} of {pages} ({count} items)": "第 {page}/{pages} 页（共 {count} 项）",
+    "Previous page": "上一页",
+    "Next page": "下一页",
+    "Please enter a listed number, f for next page, or b for previous page.": (
+        "请输入当前页中的编号，或输入 f/b 翻页。"
+    ),
     "Availability zone": "可用区",
     "GPU type": "GPU 型号",
     "Image source": "镜像来源",
@@ -330,16 +351,32 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     ),
     "Hint": "建议",
     "The machine type API returned an unnamed GPU.": "机型接口返回了未命名的 GPU。",
-    "More than 50 images matched; use a more specific filter.": (
-        "匹配到超过 50 个镜像，请输入更具体的筛选词。"
-    ),
     "Unnamed": "未命名",
     "Instance {instance} was not found.": "未找到实例 {instance}。",
-    "Instance {instance} was not found in any supported region.": (
-        "在所有支持的地域中都未找到实例 {instance}。"
+    "DescribeCompShareInstance did not return Region and Zone for instance {instance}.": (
+        "DescribeCompShareInstance 未返回实例 {instance} 的 Region 和 Zone。"
     ),
-    "Attached disk {disk} was not found in any supported region; pass --zone if it is detached.": (
-        "在所有支持的地域中都未找到已挂载云盘 {disk}；如果它已卸载，请指定 --zone。"
+    "Attached disk {disk} was not found; pass --region and --zone if it is detached.": (
+        "未找到已挂载云盘 {disk}；如果它已卸载，请指定 --region 和 --zone。"
+    ),
+    "Zone is required for this request.": "本次请求必须明确指定 Zone。",
+    "--region and --zone must be provided together.": "--region 和 --zone 必须同时指定。",
+    "--zone requires --region.": "指定 --zone 时必须同时指定 --region。",
+    "--region and --zone are required for platform images.": (
+        "查询平台镜像必须指定 --region 和 --zone。"
+    ),
+    "--region is required for image source {source}.": ("镜像来源 {source} 必须指定 --region。"),
+    "--region and --zone are required for image source {source}.": (
+        "镜像来源 {source} 必须同时指定 --region 和 --zone。"
+    ),
+    "--region is required when no instance IDs are provided.": (
+        "未提供实例 ID 时必须指定 --region。"
+    ),
+    "Instances span multiple regions; query each region separately.": (
+        "实例分布在多个地域，请按地域分别查询。"
+    ),
+    "--region and --zone are required for non-interactive create.": (
+        "非交互创建必须指定 --region 和 --zone。"
     ),
     "Image {image} was not found.": "未找到镜像 {image}。",
     "No project was returned by GetProjectList; pass --project-id explicitly.": (
@@ -347,8 +384,11 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     ),
     (
         "JSON mode cannot start the interactive wizard; pass --gpu, --count, --cpu, "
-        "--memory, and --image."
-    ): ("JSON 模式不会启动交互向导，请指定 --gpu、--count、--cpu、--memory 和 --image。"),
+        "--memory, --image, --region, and --zone."
+    ): (
+        "JSON 模式不会启动交互向导，请指定 --gpu、--count、--cpu、--memory、--image、"
+        "--region 和 --zone。"
+    ),
     (
         "No inventory is available for the selected GPU, CPU, memory, image, billing, "
         "and disk combination."
@@ -386,6 +426,19 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Instance {instance} has no SSH login command.": "实例 {instance} 没有可用的 SSH 登录命令。",
     "The API did not return a password. Run `compshare instance password {instance}` to set one.": (
         "API 未返回密码。请运行 `compshare instance password {instance}` 设置密码。"
+    ),
+    "Password hidden; rerun with --show-sensitive to display it.": (
+        "密码已隐藏；如需显示，请使用 --show-sensitive 重新运行。"
+    ),
+    "Automatic password entry is unavailable in this terminal; continuing with standard SSH.": (
+        "当前终端无法自动填写密码；将继续使用标准 SSH 连接。"
+    ),
+    "Automatic password entry is unavailable; continuing with standard SCP.": (
+        "无法自动填写密码；将继续使用标准 SCP。"
+    ),
+    "Local path {path} does not exist.": "本地路径 {path} 不存在。",
+    "The instance SSH login command cannot be used for SCP.": (
+        "实例的 SSH 登录命令无法转换为 SCP 命令。"
     ),
     "Platform image search supports only one --tag.": "平台镜像查询只支持一个 --tag。",
     "Image source {source} does not support: {options}": "镜像来源 {source} 不支持：{options}",
@@ -494,6 +547,27 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Export team orders to a CSV file.": "将团队订单导出为 CSV 文件。",
     "List team operation logs.": "列出团队操作日志。",
     "Diagnose the CLI configuration and environment.": "诊断 CLI 配置和运行环境。",
+    "Send feedback about the CLI.": "反馈 CLI 问题或建议。",
+    "Feedback category: bug or suggest.": "反馈分类：bug 或 suggest。",
+    "Feedback message; limited to 2000 characters.": "反馈内容，最多 2000 个字符。",
+    "Feedback category must be bug or suggest.": "反馈分类必须是 bug 或 suggest。",
+    "Feedback message cannot be empty.": "反馈内容不能为空。",
+    "Feedback message cannot exceed 2000 characters.": "反馈内容不能超过 2000 个字符。",
+    "Feedback service is not configured; set {variable}.": (
+        "反馈服务尚未配置，请设置 {variable}。"
+    ),
+    "Insights service rejected the request with HTTP {status}.": (
+        "数据服务拒绝了请求，HTTP 状态码为 {status}。"
+    ),
+    "Unable to reach the insights service.": "无法连接数据服务。",
+    "Insights service returned an invalid response.": "数据服务返回了无效响应。",
+    "Thank you for your feedback.": "感谢反馈。",
+    "Question cannot be empty.": "问题不能为空。",
+    "Question service rejected the request with HTTP {status}.": (
+        "问答服务拒绝了请求，HTTP 状态码为 {status}。"
+    ),
+    "Unable to reach the question service.": "无法连接问答服务。",
+    "Question service returned an invalid response.": "问答服务返回了无效响应。",
     "Team ID.": "团队 ID。",
     "Team name.": "团队名称。",
     "Team description.": "团队简介。",

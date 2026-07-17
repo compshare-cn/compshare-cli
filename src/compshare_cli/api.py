@@ -13,6 +13,12 @@ from compshare_cli.runtime import Runtime
 from compshare_cli.sdk import CompShareSDK
 
 
+def _sdk(runtime: Runtime, params: Dict[str, Any]) -> CompShareSDK:
+    raw_region = params.get("Region")
+    region = str(raw_region) if raw_region is not None else None
+    return CompShareSDK(runtime.profile, region)
+
+
 def invoke(
     runtime: Runtime,
     action: str,
@@ -23,13 +29,13 @@ def invoke(
     columns: Optional[Sequence[Tuple[str, str]]] = None,
     success: Optional[str] = None,
 ) -> Dict[str, Any]:
-    renderer = Renderer(runtime.json_output)
+    renderer = Renderer(runtime.json_output, runtime.show_sensitive)
     retries = 3 if action == "DeleteCompshareDisk" else 0
     attempt = 0
     try:
         while True:
             try:
-                response = CompShareSDK(runtime.profile, runtime.region).invoke(action, params)
+                response = _sdk(runtime, params).invoke(action, params)
                 break
             except ucloud_exc.RetCodeException as error:
                 if error.code == 8434 and attempt < retries:
@@ -80,13 +86,13 @@ def invoke(
 def call(runtime: Runtime, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
     """Invoke without rendering, for commands that combine multiple API calls."""
     try:
-        return CompShareSDK(runtime.profile, runtime.region).invoke(action, params)
+        return _sdk(runtime, params).invoke(action, params)
     except CLIError as error:
-        Renderer(runtime.json_output).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
         raise typer.Exit(1) from error
     except ucloud_exc.RetCodeException as error:
         hint = error_hint(error.action or action, error.code)
-        Renderer(runtime.json_output).error(
+        Renderer(runtime.json_output, runtime.show_sensitive).error(
             _with_hint(error.message or str(error), hint),
             details={
                 "action": error.action,
@@ -97,10 +103,10 @@ def call(runtime: Runtime, action: str, params: Dict[str, Any]) -> Dict[str, Any
         )
         raise typer.Exit(1) from error
     except ucloud_exc.UCloudException as error:
-        Renderer(runtime.json_output).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
         raise typer.Exit(1) from error
     except Exception as error:
-        Renderer(runtime.json_output).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
         raise typer.Exit(1) from error
 
 
@@ -111,7 +117,7 @@ def call_captured(
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Invoke without rendering and return a structured error for batch operations."""
     try:
-        return CompShareSDK(runtime.profile, runtime.region).invoke(action, params), None
+        return _sdk(runtime, params).invoke(action, params), None
     except CLIError as error:
         return None, {"message": str(error), "action": action}
     except ucloud_exc.RetCodeException as error:
@@ -187,13 +193,13 @@ def download_file(
 ) -> Tuple[bytes, Dict[str, str]]:
     """Download a non-JSON API response while preserving normal CLI error handling."""
     try:
-        return CompShareSDK(runtime.profile, runtime.region).download(action, params)
+        return _sdk(runtime, params).download(action, params)
     except CLIError as error:
-        Renderer(runtime.json_output).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
         raise typer.Exit(1) from error
     except ucloud_exc.RetCodeException as error:
         hint = error_hint(error.action or action, error.code)
-        Renderer(runtime.json_output).error(
+        Renderer(runtime.json_output, runtime.show_sensitive).error(
             _with_hint(error.message or str(error), hint),
             details={
                 "action": error.action or action,
@@ -204,10 +210,10 @@ def download_file(
         )
         raise typer.Exit(1) from error
     except ucloud_exc.UCloudException as error:
-        Renderer(runtime.json_output).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
         raise typer.Exit(1) from error
     except Exception as error:
-        Renderer(runtime.json_output).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
         raise typer.Exit(1) from error
 
 

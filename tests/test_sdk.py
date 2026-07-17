@@ -9,6 +9,12 @@ def test_official_sdk_accepts_profile_configuration() -> None:
     assert sdk._service.config.base_url == "https://api.compshare.cn"
 
 
+def test_official_sdk_accepts_no_default_region() -> None:
+    sdk = CompShareSDK(Profile("public", "private"))
+
+    assert sdk._service.config.region is None
+
+
 def test_sdk_uses_generic_invoke_and_quiet_logger(monkeypatch) -> None:
     captured = {}
 

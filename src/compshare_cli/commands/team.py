@@ -113,10 +113,10 @@ def show(ctx: typer.Context, team: int = typer.Argument(..., help="Team ID.")) -
     state = runtime(ctx)
     response = call(state, "GetCompShareTeamInfo", _params(ctx, {"TeamId": team}))
     if state.json_output:
-        Renderer(True).data(response)
+        Renderer(True, state.show_sensitive).data(response)
         return
     info = response.get("Team") or {}
-    Renderer(False).details(
+    Renderer(False, state.show_sensitive).details(
         "Team details",
         [
             ("TEAM ID", info.get("Id") or team),
@@ -125,7 +125,7 @@ def show(ctx: typer.Context, team: int = typer.Argument(..., help="Team ID.")) -
             ("MEMBERS", len(response.get("TeamRelation") or [])),
         ],
     )
-    Renderer(False).table(_member_rows(response), MEMBER_COLUMNS)
+    Renderer(False, state.show_sensitive).table(_member_rows(response), MEMBER_COLUMNS)
 
 
 @app.command("create", help="Create a team.")
@@ -245,15 +245,15 @@ def send_invites(
     errors = response.get("ErrorMap") or {}
     result = {**response, "ok": not errors}
     if state.json_output:
-        Renderer(True).data(result)
+        Renderer(True, state.show_sensitive).data(result)
     elif errors:
         rows = [{"UserCompanyId": user_id, **(detail or {})} for user_id, detail in errors.items()]
-        Renderer(False).table(
+        Renderer(False, state.show_sensitive).table(
             rows,
             (("UserCompanyId", "USER ID"), ("Code", "CODE"), ("Message", "MESSAGE")),
         )
     else:
-        Renderer(False).success(tr("Sent team invitations"), result)
+        Renderer(False, state.show_sensitive).success(tr("Sent team invitations"), result)
     if errors:
         raise typer.Exit(1)
 
@@ -323,7 +323,7 @@ def cancel(
 def list_members(ctx: typer.Context, team: int = typer.Argument(..., help="Team ID.")) -> None:
     state = runtime(ctx)
     response = call(state, "GetCompShareTeamInfo", _params(ctx, {"TeamId": team}))
-    Renderer(state.json_output).data(
+    Renderer(state.json_output, state.show_sensitive).data(
         response,
         rows=_member_rows(response),
         columns=MEMBER_COLUMNS,
@@ -377,7 +377,7 @@ def _quota(
     )
     failed = response.get("FailedMembers") or {}
     result = {**response, "ok": not failed}
-    Renderer(state.json_output).details(
+    Renderer(state.json_output, state.show_sensitive).details(
         "Operation completed",
         [
             ("TEAM ID", team),
@@ -465,7 +465,7 @@ def list_orders(
         offset=offset,
         limit=None if all_results else limit,
     )
-    Renderer(state.json_output).data(
+    Renderer(state.json_output, state.show_sensitive).data(
         response,
         rows=response.get("OrderInfos") or [],
         columns=ORDER_COLUMNS,
@@ -486,7 +486,7 @@ def order_summary(
         "DescribeTeamMemberOrderCount",
         _billing_params(ctx, team, member, start, end),
     )
-    Renderer(state.json_output).details(
+    Renderer(state.json_output, state.show_sensitive).details(
         "Billing summary",
         [
             ("COUNT", response.get("TotalCount")),
@@ -527,13 +527,13 @@ def unpaid(
     )
     response = {"orders": orders, "summary": summary}
     if state.json_output:
-        Renderer(True).data(response)
+        Renderer(True, state.show_sensitive).data(response)
         return
-    Renderer(False).details(
+    Renderer(False, state.show_sensitive).details(
         "Unpaid summary",
         [("COUNT", summary.get("TotalCount")), ("AMOUNT", summary.get("Amount"))],
     )
-    Renderer(False).table(orders.get("OrderInfos") or [], ORDER_COLUMNS)
+    Renderer(False, state.show_sensitive).table(orders.get("OrderInfos") or [], ORDER_COLUMNS)
 
 
 @billing_app.command("products", help="List product types used by a team member.")
@@ -550,7 +550,7 @@ def products(
     params.update(compact({"OrderStates": split_csv(status or []) or None}))
     response = call(state, "ListMemberProductType", params)
     rows = [{"ProductType": item} for item in response.get("ProductTypeList") or []]
-    Renderer(state.json_output).data(
+    Renderer(state.json_output, state.show_sensitive).data(
         response,
         rows=rows,
         columns=(("ProductType", "PRODUCT"),),
@@ -598,7 +598,7 @@ def export_orders(
         "bytes": len(content),
         "content_type": headers.get("Content-Type"),
     }
-    Renderer(state.json_output).details(
+    Renderer(state.json_output, state.show_sensitive).details(
         "Export completed",
         [("PATH", result["path"]), ("SIZE", result["bytes"])],
         response=result,
@@ -639,7 +639,7 @@ def audit(
         offset=offset,
         limit=None if all_results else limit,
     )
-    Renderer(state.json_output).data(
+    Renderer(state.json_output, state.show_sensitive).data(
         response,
         rows=response.get("Logs") or [],
         columns=(

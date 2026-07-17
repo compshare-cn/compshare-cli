@@ -9,11 +9,14 @@ from typer import core as typer_core
 from typer.main import get_command
 
 from compshare_cli import __version__
+from compshare_cli.commands import ask as ask_command
 from compshare_cli.commands import doctor as doctor_command
+from compshare_cli.commands import feedback as feedback_command
 from compshare_cli.commands import image, instance, storage, team
 from compshare_cli.config import DEFAULT_PROFILE, ConfigStore, Profile
 from compshare_cli.errors import CLIError
 from compshare_cli.i18n import configured_language, localize_command, normalize_language, tr
+from compshare_cli.insights import record_command
 from compshare_cli.output import Renderer
 from compshare_cli.runtime import Runtime
 
@@ -65,10 +68,16 @@ def root(
         "--json",
         help="Emit machine-readable JSON.",
     ),
+    show_sensitive: bool = typer.Option(
+        False,
+        "--show-sensitive",
+        help="Show passwords, IP addresses, access URLs, and login commands.",
+    ),
 ) -> None:
     """CompShare CLI."""
     ctx.obj = Runtime(
         json_output=json_output,
+        show_sensitive=show_sensitive,
         profile_name=profile,
     )
 
@@ -99,7 +108,8 @@ def config(
         Profile(public_key=public, private_key=private),
         activate=activate,
     )
-    Renderer(ctx.find_root().obj.json_output).success(
+    state = ctx.find_root().obj
+    Renderer(state.json_output, state.show_sensitive).success(
         tr("Saved credential profile {name}", name=name),
         {"ok": True, "profile": name, "active": activate},
     )
@@ -123,7 +133,8 @@ def config_set(
         Profile(public_key=public, private_key=private),
         activate=activate,
     )
-    Renderer(ctx.find_root().obj.json_output).success(
+    state = ctx.find_root().obj
+    Renderer(state.json_output, state.show_sensitive).success(
         tr("Saved credential profile {name}", name=name),
         {"ok": True, "profile": name, "active": activate},
     )
@@ -135,7 +146,8 @@ def config_list(ctx: typer.Context) -> None:
     store = ConfigStore()
     current = store.current_profile()
     profiles = [{"Profile": name, "Active": name == current} for name in store.list_profiles()]
-    Renderer(ctx.find_root().obj.json_output).data(
+    state = ctx.find_root().obj
+    Renderer(state.json_output, state.show_sensitive).data(
         {"current_profile": current, "profiles": profiles},
         rows=profiles,
         columns=(("Profile", "PROFILE"), ("Active", "ACTIVE")),
@@ -146,7 +158,8 @@ def config_list(ctx: typer.Context) -> None:
 def config_use(ctx: typer.Context, name: str) -> None:
     """Set the default credential profile."""
     ConfigStore().use_profile(name)
-    Renderer(ctx.find_root().obj.json_output).success(
+    state = ctx.find_root().obj
+    Renderer(state.json_output, state.show_sensitive).success(
         tr("Using credential profile {name}", name=name),
         {"ok": True, "profile": name},
     )
@@ -162,7 +175,8 @@ def config_delete(
     if not yes and not typer.confirm(tr("Delete credential profile {name}?", name=name)):
         raise typer.Abort()
     ConfigStore().delete_profile(name)
-    Renderer(ctx.find_root().obj.json_output).success(
+    state = ctx.find_root().obj
+    Renderer(state.json_output, state.show_sensitive).success(
         tr("Deleted credential profile {name}", name=name),
         {"ok": True, "profile": name},
     )
@@ -172,8 +186,9 @@ def config_delete(
 def config_path_command(ctx: typer.Context) -> None:
     """Show the configuration file path."""
     path = str(ConfigStore().path)
-    if ctx.find_root().obj.json_output:
-        Renderer(True).data({"path": path})
+    state = ctx.find_root().obj
+    if state.json_output:
+        Renderer(True, state.show_sensitive).data({"path": path})
     else:
         typer.echo(path)
 
@@ -181,8 +196,9 @@ def config_path_command(ctx: typer.Context) -> None:
 @app.command("version")
 def version(ctx: typer.Context) -> None:
     """Print the CLI version."""
-    if ctx.find_root().obj.json_output:
-        Renderer(True).data({"version": __version__})
+    state = ctx.find_root().obj
+    if state.json_output:
+        Renderer(True, state.show_sensitive).data({"version": __version__})
     else:
         typer.echo(__version__)
 
@@ -193,7 +209,8 @@ def lang(
     language: Optional[str] = typer.Argument(None, help="Language: zh or en."),
 ) -> None:
     """Set or show the default help language."""
-    renderer = Renderer(ctx.find_root().obj.json_output)
+    state = ctx.find_root().obj
+    renderer = Renderer(state.json_output, state.show_sensitive)
     if language is None:
         current = configured_language()
         message = (
@@ -220,23 +237,79 @@ def doctor(ctx: typer.Context) -> None:
     doctor_command.run(ctx.find_root().obj)
 
 
+@app.command("ask", help="Ask a CompShare product question.")
+def ask(
+    ctx: typer.Context,
+    question: str = typer.Argument(..., help="Question to answer."),
+) -> None:
+    ask_command.run(ctx.find_root().obj, question)
+
+
+@app.command("feedback")
+def feedback(
+    ctx: typer.Context,
+    category: feedback_command.FeedbackCategory = typer.Argument(
+        ...,
+        help="Feedback category: bug or suggest.",
+    ),
+    message: str = typer.Argument(
+        ...,
+        help="Feedback message; limited to 2000 characters.",
+    ),
+) -> None:
+    """Send feedback about the CLI."""
+    feedback_command.run(ctx.find_root().obj, category, message)
+
+
+def _command_path(command: click.Command, argv: List[str]) -> Optional[str]:
+    if not argv or "-h" in argv or "--help" in argv:
+        return None
+    remaining = list(argv)
+    while remaining and remaining[0].startswith("-"):
+        option = remaining.pop(0)
+        if option == "--profile" and remaining:
+            remaining.pop(0)
+        elif option.startswith("--profile=") or option in {"--json", "--show-sensitive"}:
+            continue
+        else:
+            return None
+
+    path: List[str] = []
+    current = command
+    while remaining and isinstance(current, click.Group):
+        name = remaining.pop(0)
+        child = current.commands.get(name)
+        if child is None:
+            break
+        path.append(name)
+        current = child
+    return ".".join(path) or None
+
+
 def main(args: Optional[List[str]] = None) -> None:
-    argv = list(sys.argv[1:] if args is None else args)
+    original_argv = list(sys.argv[1:] if args is None else args)
+    argv = list(original_argv)
     if not argv:
         argv = ["-h"]
+    telemetry_command: Optional[str] = None
+    show_sensitive = "--show-sensitive" in argv
     try:
         language = configured_language()
         command = localize_command(get_command(app), language)
+        telemetry_command = _command_path(command, original_argv)
         result = command.main(args=argv, prog_name="compshare", standalone_mode=False)
     except CLIError as error:
-        Renderer("--json" in argv).error(str(error))
+        Renderer("--json" in argv, show_sensitive).error(str(error))
         raise SystemExit(2) from error
     except _CLICK_EXCEPTIONS as error:
-        Renderer("--json" in argv).error(error.format_message())
+        Renderer("--json" in argv, show_sensitive).error(error.format_message())
         raise SystemExit(error.exit_code) from error
     except _ABORT_EXCEPTIONS as error:
-        Renderer("--json" in argv).error(tr("Aborted"))
+        Renderer("--json" in argv, show_sensitive).error(tr("Aborted"))
         raise SystemExit(1) from error
+    finally:
+        if telemetry_command:
+            record_command(telemetry_command)
     if isinstance(result, int) and result:
         raise SystemExit(result)
 

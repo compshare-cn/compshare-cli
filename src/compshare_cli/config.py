@@ -11,8 +11,6 @@ from typing import Any, Dict, List, Optional
 from compshare_cli.errors import ConfigError
 
 DEFAULT_PROFILE = "default"
-DEFAULT_REGION = "cn-wlcb"
-DEFAULT_ZONE = "cn-wlcb-01"
 DEFAULT_BASE_URL = "https://api.compshare.cn"
 
 
@@ -29,13 +27,15 @@ class Profile:
     public_key: str
     private_key: str
 
-    def sdk_config(self, region: str) -> Dict[str, Any]:
-        return {
+    def sdk_config(self, region: Optional[str] = None) -> Dict[str, Any]:
+        config = {
             "public_key": self.public_key,
             "private_key": self.private_key,
-            "region": region,
             "base_url": DEFAULT_BASE_URL,
         }
+        if region is not None:
+            config["region"] = region
+        return config
 
 
 class ConfigStore:

@@ -45,6 +45,19 @@ def encode_password(value: str) -> str:
     return base64.b64encode(value.encode("utf-8")).decode("ascii")
 
 
+def decode_password(value: Optional[str]) -> Optional[str]:
+    """Decode API password fields while tolerating legacy plaintext responses."""
+    if value is None:
+        return None
+    try:
+        decoded = base64.b64decode(value, validate=True).decode("utf-8")
+    except (ValueError, UnicodeError):
+        return value
+    if not decoded or not decoded.isprintable() or encode_password(decoded) != value:
+        return value
+    return decoded
+
+
 def timestamp(value: str) -> int:
     relative = re.fullmatch(r"\s*(\d+)\s*([mhd])\s*", value, re.IGNORECASE)
     if relative:

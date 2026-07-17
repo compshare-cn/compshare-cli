@@ -83,3 +83,22 @@ def test_invoke_accepts_null_list_in_human_output(monkeypatch, capsys) -> None:
 
     assert response == {"Items": None}
     assert "No results" in capsys.readouterr().out
+
+
+def test_sdk_region_comes_only_from_current_request(monkeypatch) -> None:
+    regions = []
+
+    class FakeSDK:
+        def __init__(self, profile, region):
+            regions.append(region)
+
+        def invoke(self, action, params):
+            return {"RetCode": 0}
+
+    monkeypatch.setattr(api, "CompShareSDK", FakeSDK)
+    state = Runtime(_profile=Profile("public", "private"))
+
+    api.call(state, "RegionalAction", {"Region": "cn-sh2"})
+    api.call(state, "GlobalAction", {})
+
+    assert regions == ["cn-sh2", None]

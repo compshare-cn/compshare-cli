@@ -9,8 +9,16 @@ from compshare_cli.commands import doctor as doctor_module
 from compshare_cli.commands import image as image_module
 from compshare_cli.commands import instance, team
 from compshare_cli.i18n import localize_command
+from compshare_cli.ssh import RemoteExecutionResult
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def isolate_ssh_cache(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPSHARE_SSH_CACHE_FILE", str(tmp_path / "ssh-cache.json"))
+    monkeypatch.setenv("COMPSHARE_PUBLIC_KEY", "test-public")
+    monkeypatch.setenv("COMPSHARE_PRIVATE_KEY", "test-private")
 
 
 @pytest.mark.parametrize(
@@ -375,7 +383,7 @@ def test_create_interactive_wizard_resolves_all_required_parameters(monkeypatch)
     )
     result = runner.invoke(
         cli.app,
-        ["instance", "create", "--yes"],
+        ["instance", "create", "--yes", "--no-wait"],
         input="1\n1\n\n\n",
         env={
             "COMPSHARE_PUBLIC_KEY": "public",
@@ -467,6 +475,14 @@ def test_create_explicit_json_mode_skips_discovery(monkeypatch) -> None:
         return {"RetCode": 0, "UHostIds": ["uhost-test"]}
 
     monkeypatch.setattr(instance, "call", fake_call)
+    waits = []
+    monkeypatch.setattr(
+        instance,
+        "_wait_for_instance",
+        lambda state, value, **kwargs: (
+            waits.append((value, kwargs)) or {"UHostSet": [{"UHostId": value, "State": "Running"}]}
+        ),
+    )
     result = runner.invoke(
         cli.app,
         [
@@ -502,6 +518,7 @@ def test_create_explicit_json_mode_skips_discovery(monkeypatch) -> None:
         "CreateCompShareInstance",
     ]
     assert json.loads(result.stdout)["selection"]["ChargeType"] == "Postpay"
+    assert waits == [("uhost-test", {"region": "cn-wlcb", "desired": {"Running"}, "timeout": 600})]
 
 
 def test_create_dry_run_never_calls_create(monkeypatch) -> None:
@@ -776,6 +793,7 @@ def test_ssh_print_redacts_sensitive_values_by_default(monkeypatch) -> None:
         "instance": "uhost-1",
         "command": "***",
         "password": "***",
+        "credential_source": "api",
     }
 
 
@@ -804,7 +822,39 @@ def test_ssh_print_includes_sensitive_values_only_with_global_flag(monkeypatch) 
         "instance": "uhost-1",
         "command": "ssh root@example.invalid",
         "password": "instance-secret",
+        "credential_source": "api",
     }
+
+
+def test_ssh_reuses_cached_connection_data_without_describing_again(monkeypatch) -> None:
+    descriptions = []
+
+    def locate(state, value):
+        descriptions.append(value)
+        return (
+            "cn-wlcb",
+            "cn-wlcb-01",
+            {
+                "UHostId": value,
+                "Region": "cn-wlcb",
+                "Zone": "cn-wlcb-01",
+                "State": "Running",
+                "SshLoginCommand": "ssh root@example.invalid",
+                "Password": "instance-secret",
+            },
+        )
+
+    monkeypatch.setattr(instance, "locate_instance", locate)
+    args = ["--json", "instance", "ssh", "uhost-1", "--print"]
+
+    first = runner.invoke(cli.app, args)
+    second = runner.invoke(cli.app, args)
+
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+    assert json.loads(first.stdout)["credential_source"] == "api"
+    assert json.loads(second.stdout)["credential_source"] == "cache"
+    assert descriptions == ["uhost-1"]
 
 
 def test_ssh_automatically_enters_hidden_password_by_default(monkeypatch) -> None:
@@ -992,11 +1042,79 @@ def test_ssh_executes_remote_command_with_password_and_returns_its_status(monkey
         (
             [
                 "ssh",
+                "-o",
+                "ConnectTimeout=30",
                 "-p",
                 "2222",
                 "root@example.invalid",
                 "nvidia-smi",
                 "--query-gpu=name",
+            ],
+            "instance-secret",
+        )
+    ]
+
+
+def test_ssh_json_executes_and_returns_structured_connection_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-wlcb",
+            "cn-wlcb-01",
+            {
+                "UHostId": value,
+                "State": "Running",
+                "SshLoginCommand": "ssh root@example.invalid",
+                "Password": "instance-secret",
+            },
+        ),
+    )
+    executions = []
+    monkeypatch.setattr(
+        instance,
+        "execute_captured_with_password",
+        lambda argv, password: (
+            executions.append((argv, password))
+            or RemoteExecutionResult(
+                255,
+                "",
+                "ssh: connect to host example.invalid port 22: Connection timed out\n",
+                "connection",
+                "connection_timeout",
+            )
+        ),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "ssh", "uhost-1", "--", "hostname"],
+    )
+
+    assert result.exit_code == 255, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "instance": "uhost-1",
+        "ok": False,
+        "phase": "connection",
+        "exit_code": 255,
+        "stdout": "",
+        "stderr": "ssh: connect to host example.invalid port 22: Connection timed out\n",
+        "error": {
+            "phase": "connection",
+            "code": "connection_timeout",
+            "message": "ssh: connect to host example.invalid port 22: Connection timed out",
+        },
+        "credential_source": "api",
+    }
+    assert executions == [
+        (
+            [
+                "ssh",
+                "-o",
+                "ConnectTimeout=30",
+                "root@example.invalid",
+                "hostname",
             ],
             "instance-secret",
         )
@@ -1038,6 +1156,7 @@ def test_ssh_print_includes_quoted_remote_command_when_sensitive(monkeypatch) ->
         "instance": "uhost-1",
         "command": "ssh root@example.invalid 'cd /workspace && python train.py'",
         "password": "instance-secret",
+        "credential_source": "api",
     }
 
 

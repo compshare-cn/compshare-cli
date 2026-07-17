@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from typing import Any, List, Optional
 
 _ASKPASS_PASSWORD_FILE_ENV = "COMPSHARE_INTERNAL_SSH_PASSWORD_FILE"
@@ -38,6 +39,21 @@ _SCP_SHARED_OPTIONS = {"-c", "-F", "-i", "-J", "-o"}
 
 class PasswordAutomationUnavailable(RuntimeError):
     """Raised when the current terminal cannot safely automate an SSH password."""
+
+
+@dataclass(frozen=True)
+class RemoteExecutionResult:
+    """Captured output and an Agent-friendly classification of an SSH execution."""
+
+    exit_code: int
+    stdout: str
+    stderr: str
+    phase: str
+    error_code: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        return self.exit_code == 0
 
 
 def _is_windows() -> bool:
@@ -171,13 +187,70 @@ def execute_with_password(argv: List[str], password: str) -> int:
     return _run_with_askpass(command, password)
 
 
+def execute_captured_with_password(argv: List[str], password: str) -> RemoteExecutionResult:
+    """Run and capture a non-interactive SSH command without exposing its password."""
+    command = _password_authentication(argv, command_mode=True)
+    completed = _run_with_askpass(command, password, capture=True)
+    assert isinstance(completed, subprocess.CompletedProcess)
+    return remote_execution_result(completed.returncode, completed.stdout, completed.stderr)
+
+
+def execute_captured(argv: List[str]) -> RemoteExecutionResult:
+    """Run and capture a non-interactive SSH command using normal OpenSSH auth."""
+    executable = os.path.basename(argv[0]).casefold()
+    if executable not in {"ssh", "ssh.exe"}:
+        raise PasswordAutomationUnavailable
+    command = [
+        argv[0],
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-n",
+        "-T",
+        *argv[1:],
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    return remote_execution_result(completed.returncode, completed.stdout, completed.stderr)
+
+
+def remote_execution_result(exit_code: int, stdout: str, stderr: str) -> RemoteExecutionResult:
+    """Classify common OpenSSH failures while preserving the original diagnostics."""
+    if exit_code == 0:
+        return RemoteExecutionResult(exit_code, stdout, stderr, "completed")
+
+    diagnostic = stderr.casefold()
+    patterns = (
+        ("could not resolve hostname", "connection", "dns_resolution_failed"),
+        ("name or service not known", "connection", "dns_resolution_failed"),
+        ("connection timed out", "connection", "connection_timeout"),
+        ("operation timed out", "connection", "connection_timeout"),
+        ("no route to host", "connection", "network_unreachable"),
+        ("network is unreachable", "connection", "network_unreachable"),
+        ("connection refused", "connection", "connection_refused"),
+        ("host key verification failed", "connection", "host_key_verification_failed"),
+        ("permission denied", "authentication", "authentication_failed"),
+        ("authentication failed", "authentication", "authentication_failed"),
+        ("too many authentication failures", "authentication", "authentication_failed"),
+    )
+    for marker, phase, error_code in patterns:
+        if marker in diagnostic:
+            return RemoteExecutionResult(exit_code, stdout, stderr, phase, error_code)
+    if exit_code == 255:
+        return RemoteExecutionResult(exit_code, stdout, stderr, "ssh", "ssh_failed")
+    return RemoteExecutionResult(exit_code, stdout, stderr, "remote_command", "remote_exit_nonzero")
+
+
 def copy_with_password(argv: List[str], password: str) -> int:
     """Run an SCP upload using the API-provided password."""
     command = _scp_password_authentication(argv)
     return _run_with_askpass(command, password)
 
 
-def _run_with_askpass(command: List[str], password: str) -> int:
+def _run_with_askpass(
+    command: List[str],
+    password: str,
+    *,
+    capture: bool = False,
+) -> Any:
     with tempfile.TemporaryDirectory(prefix="compshare-ssh-") as temporary_directory:
         password_file = os.path.join(temporary_directory, "password")
         descriptor = os.open(password_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -192,6 +265,14 @@ def _run_with_askpass(command: List[str], password: str) -> int:
             }
         )
         environment.setdefault("DISPLAY", "compshare-ssh")
+        if capture:
+            return subprocess.run(
+                command,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
         return subprocess.call(command, env=environment)
 
 

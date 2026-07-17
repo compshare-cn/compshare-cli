@@ -93,6 +93,15 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Month, Day, Dynamic or Postpay.": "目标计费方式：Month、Day、Dynamic 或 Postpay。",
     "Print instead of executing SSH.": "只显示 SSH 命令，不执行连接。",
     "Automatically enter the password returned by the API.": "自动填写 API 返回的登录密码。",
+    "Wait for the instance to be running before connecting.": "连接前等待实例进入运行状态。",
+    "Maximum SSH connection time in seconds.": "SSH 建立连接的最长时间（秒）。",
+    "Cache SSH connection data to avoid repeated instance queries.": (
+        "缓存 SSH 连接信息，避免重复查询实例。"
+    ),
+    "SSH connection cache lifetime in seconds.": "SSH 连接缓存的有效期（秒）。",
+    "Refresh SSH connection data from the API before connecting.": (
+        "连接前从 API 强制刷新 SSH 连接信息。"
+    ),
     "Remote command and arguments; use -- before command options.": (
         "要在实例中执行的命令及参数；命令包含选项时请先使用 -- 分隔。"
     ),

@@ -1,5 +1,7 @@
 import json
+from io import BytesIO, TextIOWrapper
 
+from compshare_cli import output
 from compshare_cli.output import Renderer, sanitized
 
 
@@ -29,6 +31,17 @@ def test_json_renderer_emits_one_compact_document(capsys) -> None:
     output = capsys.readouterr().out
     assert output.count("\n") == 1
     assert json.loads(output) == {"RetCode": 0, "value": "中文"}
+
+
+def test_json_renderer_writes_utf8_bytes_under_a_gbk_stdout(monkeypatch) -> None:
+    raw = BytesIO()
+    gbk_stdout = TextIOWrapper(raw, encoding="gbk")
+    monkeypatch.setattr(output.sys, "stdout", gbk_stdout)
+
+    Renderer(True).data({"ok": False, "error": "尚未配置 API 密钥。"})
+
+    document = raw.getvalue().decode("utf-8")
+    assert json.loads(document) == {"ok": False, "error": "尚未配置 API 密钥。"}
 
 
 def test_table_accepts_no_rows(capsys) -> None:

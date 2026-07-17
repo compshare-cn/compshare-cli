@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from compshare_cli import ssh
 
 
@@ -148,6 +150,29 @@ def test_execute_with_password_uses_askpass_without_password_in_argv(monkeypatch
     assert environment["SSH_ASKPASS_REQUIRE"] == "force"
     assert environment[ssh._ASKPASS_PASSWORD_FILE_ENV] == str(password_file)
     assert ssh._ASKPASS_PASSWORD_FILE_ENV not in ssh.os.environ
+
+
+@pytest.mark.parametrize(
+    ("stderr", "phase", "error_code"),
+    [
+        (
+            "ssh: connect to host x port 22: Connection timed out",
+            "connection",
+            "connection_timeout",
+        ),
+        (
+            "root@x: Permission denied (publickey,password).",
+            "authentication",
+            "authentication_failed",
+        ),
+        ("unclassified OpenSSH failure", "ssh", "ssh_failed"),
+    ],
+)
+def test_remote_execution_result_classifies_ssh_failures(stderr, phase, error_code) -> None:
+    result = ssh.remote_execution_result(255, "", stderr)
+
+    assert result.phase == phase
+    assert result.error_code == error_code
 
 
 def test_askpass_reads_and_removes_internal_password_file(monkeypatch, capsys, tmp_path) -> None:

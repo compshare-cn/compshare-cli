@@ -91,6 +91,11 @@ compshare instance ssh INSTANCE_ID --no-auto-password
 # 自动登录后执行远程命令；远程参数用 -- 与 CLI 选项分隔
 compshare instance ssh INSTANCE_ID -- nvidia-smi --query-gpu=name
 compshare instance ssh INSTANCE_ID -- 'cd /workspace && python train.py'
+# Agent/脚本：执行并返回 ok、phase、exit_code、stdout、stderr、error
+compshare --json instance ssh INSTANCE_ID -- nvidia-smi
+# 强制刷新或禁用本地 SSH 连接缓存
+compshare instance ssh INSTANCE_ID --refresh
+compshare instance ssh INSTANCE_ID --no-cache
 # 上传本地文件或目录，目录会自动递归复制
 compshare instance scp INSTANCE_ID ./model.bin /workspace/model.bin
 compshare instance scp INSTANCE_ID ./dataset /workspace/dataset
@@ -205,6 +210,10 @@ compshare lang       # 查看当前语言
 - `instance ssh` 在支持的交互式终端中通过伪终端自动填写登录密码，不会打印密码或将其放入进程参数。
 - 自动登录会接受首次出现的 SSH 主机密钥；已记录主机的密钥发生变化时仍会拒绝连接。
 - `instance ssh INSTANCE_ID -- COMMAND` 可非交互执行远程命令，透传命令输出和退出码。
+- `--json instance ssh INSTANCE_ID -- COMMAND` 会真实执行命令，并结构化返回退出码、标准输出、标准错误及连接/认证错误阶段。
+- `--json` 始终以 UTF-8 字节输出，不依赖 Windows 活动代码页或终端编码。
+- `instance ssh` 默认将 API 返回的 SSH 命令和密码按 profile/实例缓存 1 小时；Windows 使用当前用户的 DPAPI 加密密码，其他平台将缓存文件权限限制为当前用户。可用 `--refresh` 强制更新、`--no-cache` 禁用；重置密码和重装实例会清除对应缓存。
+- 实例创建是异步操作；`instance create` 默认等待到 `Running`，显式使用 `--no-wait` 才会在创建接口返回后立即退出。`instance ssh` 也会默认等待实例运行后再连接。
 - `instance scp INSTANCE_ID LOCAL_PATH REMOTE_PATH` 可自动认证并上传本地文件或目录。
 - `--show-sensitive` 会恢复这些字段的原始值；请勿在共享终端、CI 日志或 Agent 会话中使用。
 - 删除、关机、重启、重装和改配等操作默认要求确认。

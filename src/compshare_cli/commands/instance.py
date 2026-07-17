@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import sys
 import time
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
@@ -12,6 +14,7 @@ import typer
 
 from compshare_cli.api import call, call_captured, collect_pages, invoke
 from compshare_cli.commands.common import confirm, confirm_details, request, runtime
+from compshare_cli.config import ConfigStore
 from compshare_cli.errors import UsageError
 from compshare_cli.i18n import tr
 from compshare_cli.location import instance_location, locate_instance, supported_locations
@@ -30,9 +33,12 @@ from compshare_cli.ssh import (
     PasswordAutomationUnavailable,
     connect_with_password,
     copy_with_password,
+    execute_captured,
+    execute_captured_with_password,
     execute_with_password,
     scp_upload_command,
 )
+from compshare_cli.ssh_cache import DEFAULT_TTL, SSHCredentialCache
 
 app = typer.Typer(help="Manage GPU instances.", no_args_is_help=True)
 ports_app = typer.Typer(help="Manage container port mappings.", no_args_is_help=True)
@@ -201,6 +207,41 @@ def _wait_enabled(state: Runtime, value: Optional[bool]) -> bool:
     if value is not None:
         return value
     return not state.json_output and sys.stdout.isatty()
+
+
+def _create_wait_enabled(value: Optional[bool]) -> bool:
+    """Creation is asynchronous, so wait by default in both human and Agent modes."""
+    return True if value is None else value
+
+
+def _ssh_cache_profile(state: Runtime) -> str:
+    name = (
+        state.profile_name or os.environ.get("COMPSHARE_PROFILE") or ConfigStore().current_profile()
+    )
+    credential = sha256(state.profile.public_key.encode("utf-8")).hexdigest()[:16]
+    return f"{name}:{credential}"
+
+
+def _locate_ssh_instance(
+    state: Runtime,
+    instance: str,
+    *,
+    use_cache: bool,
+    refresh: bool,
+    cache_ttl: int,
+) -> Tuple[str, str, Dict[str, Any], str]:
+    cache = SSHCredentialCache()
+    profile = _ssh_cache_profile(state)
+    if use_cache and not refresh:
+        host = cache.get(profile, instance, ttl=cache_ttl)
+        if host is not None:
+            region, zone = instance_location(host, instance)
+            return region, zone, host, "cache"
+
+    region, zone, host = locate_instance(state, instance)
+    if use_cache:
+        cache.put(profile, instance, host)
+    return region, zone, host, "api"
 
 
 def _wait_for_instance(
@@ -937,9 +978,16 @@ def create(
     ids = created.get("UHostIds") or created.get("UHostId") or []
     if isinstance(ids, str):
         ids = [ids]
-    if _wait_enabled(state, wait):
+    if _create_wait_enabled(wait):
         result["final"] = [
-            _wait_for_instance(state, item, region=region, timeout=timeout) for item in ids
+            _wait_for_instance(
+                state,
+                item,
+                region=region,
+                desired={"Running"},
+                timeout=timeout,
+            )
+            for item in ids
         ]
     Renderer(state.json_output, state.show_sensitive).details(
         "Operation completed",
@@ -1286,6 +1334,7 @@ def password(
         yes=yes,
         extra={"Password": encode_password(secret)},
     )
+    SSHCredentialCache().delete(_ssh_cache_profile(runtime(ctx)), instance)
 
 
 @app.command("reinstall", help="Reinstall an instance from an image.")
@@ -1318,6 +1367,7 @@ def reinstall(
         wait=wait,
         timeout=timeout,
     )
+    SSHCredentialCache().delete(_ssh_cache_profile(runtime(ctx)), instance)
 
 
 @app.command("resize", help="Change instance CPU, memory, GPU or disk size.")
@@ -1758,16 +1808,65 @@ def ssh(
         "--auto-password/--no-auto-password",
         help="Automatically enter the password returned by the API.",
     ),
+    wait: bool = typer.Option(
+        True,
+        "--wait/--no-wait",
+        help="Wait for the instance to be running before connecting.",
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, help="Maximum wait time in seconds."),
+    connect_timeout: int = typer.Option(
+        30,
+        "--connect-timeout",
+        min=1,
+        help="Maximum SSH connection time in seconds.",
+    ),
+    use_cache: bool = typer.Option(
+        True,
+        "--cache/--no-cache",
+        help="Cache SSH connection data to avoid repeated instance queries.",
+    ),
+    cache_ttl: int = typer.Option(
+        DEFAULT_TTL,
+        "--cache-ttl",
+        min=1,
+        help="SSH connection cache lifetime in seconds.",
+    ),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help="Refresh SSH connection data from the API before connecting.",
+    ),
 ) -> None:
     state = runtime(ctx)
-    region, zone, host = locate_instance(state, instance)
+    region, zone, host, credential_source = _locate_ssh_instance(
+        state,
+        instance,
+        use_cache=use_cache,
+        refresh=refresh,
+        cache_ttl=cache_ttl,
+    )
+    if wait and host.get("State") and str(host.get("State")) != "Running":
+        ready = _wait_for_instance(
+            state,
+            instance,
+            region=region,
+            desired={"Running"},
+            timeout=timeout,
+        )
+        hosts = ready.get("UHostSet") or []
+        if hosts:
+            host = hosts[0]
+            if use_cache:
+                SSHCredentialCache().put(_ssh_cache_profile(state), instance, host)
     command = host.get("SshLoginCommand")
     raw_password = host.get("Password")
     password = decode_password(str(raw_password)) if raw_password is not None else None
     if not command:
         raise UsageError(tr("Instance {instance} has no SSH login command.", instance=instance))
     argv = [*shlex.split(command), *(remote_command or [])]
-    if print_only or state.json_output:
+    if remote_command:
+        argv[1:1] = ["-o", f"ConnectTimeout={connect_timeout}"]
+    if print_only or (state.json_output and not remote_command):
         Renderer(state.json_output, state.show_sensitive).data(
             {
                 "instance": instance,
@@ -1775,9 +1874,43 @@ def ssh(
                 if not remote_command
                 else f"{command} {shlex.join(remote_command)}",
                 "password": password,
+                "credential_source": credential_source,
             }
         )
         return
+    if remote_command and state.json_output:
+        execution = (
+            execute_captured_with_password(argv, str(password))
+            if password and auto_password
+            else execute_captured(argv)
+        )
+        error = None
+        if not execution.ok:
+            message = execution.stderr.strip() or f"SSH exited with status {execution.exit_code}."
+            error = {
+                "phase": execution.phase,
+                "code": execution.error_code,
+                "message": message,
+            }
+            if credential_source == "cache" and execution.phase in {
+                "authentication",
+                "connection",
+                "ssh",
+            }:
+                SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
+        Renderer(True, state.show_sensitive).data(
+            {
+                "instance": instance,
+                "ok": execution.ok,
+                "phase": execution.phase,
+                "exit_code": execution.exit_code,
+                "stdout": execution.stdout,
+                "stderr": execution.stderr,
+                "error": error,
+                "credential_source": credential_source,
+            }
+        )
+        raise typer.Exit(execution.exit_code)
     if password and state.show_sensitive:
         typer.echo(f"Password: {password}")
     if password and auto_password:
@@ -1795,6 +1928,8 @@ def ssh(
                 err=True,
             )
         else:
+            if exit_code == 255 and credential_source == "cache":
+                SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
             raise typer.Exit(exit_code)
     if password and not state.show_sensitive:
         typer.echo(tr("Password hidden; rerun with --show-sensitive to display it."))
@@ -1806,7 +1941,10 @@ def ssh(
                 instance=instance,
             )
         )
-    raise typer.Exit(subprocess.call(argv))
+    exit_code = subprocess.call(argv)
+    if exit_code == 255 and credential_source == "cache":
+        SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
+    raise typer.Exit(exit_code)
 
 
 @app.command("scp", help="Copy a local file or directory to an instance.")

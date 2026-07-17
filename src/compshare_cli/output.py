@@ -65,6 +65,22 @@ def sanitized(value: Any, *, show_sensitive: bool = False) -> Any:
     return value
 
 
+def _write_json(payload: Dict[str, Any]) -> None:
+    """Write one UTF-8 JSON document independently of the console code page."""
+    document = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+    stream = sys.stdout
+    binary = getattr(stream, "buffer", None)
+    if binary is not None:
+        stream.flush()
+        binary.write(document.encode("utf-8"))
+        binary.flush()
+        return
+    # String-only test/application streams have no byte encoding contract. Escaping
+    # non-ASCII keeps this fallback valid UTF-8 under every ASCII-compatible encoding.
+    stream.write(json.dumps(payload, ensure_ascii=True, separators=(",", ":")) + "\n")
+    stream.flush()
+
+
 class Renderer:
     def __init__(self, json_output: bool, show_sensitive: bool = False) -> None:
         self.json_output = json_output
@@ -80,7 +96,7 @@ class Renderer:
     ) -> None:
         safe = sanitized(response, show_sensitive=self.show_sensitive)
         if self.json_output:
-            sys.stdout.write(json.dumps(safe, ensure_ascii=False, separators=(",", ":")) + "\n")
+            _write_json(safe)
             return
         if rows is not None and columns:
             self.table(rows, columns)
@@ -139,7 +155,7 @@ class Renderer:
                     details,
                     show_sensitive=self.show_sensitive,
                 )
-            sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+            _write_json(payload)
         else:
             Console(stderr=True).print(f"[red]{tr('Error')}:[/red] {message}")
 

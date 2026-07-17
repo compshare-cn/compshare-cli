@@ -40,6 +40,10 @@ class PasswordAutomationUnavailable(RuntimeError):
     """Raised when the current terminal cannot safely automate an SSH password."""
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def _password_authentication(argv: List[str], *, command_mode: bool = False) -> List[str]:
     executable = os.path.basename(argv[0]).casefold()
     if executable not in {"ssh", "ssh.exe"}:
@@ -133,7 +137,7 @@ def scp_upload_command(
 
 
 def _askpass_executable() -> str:
-    name = "compshare-ssh-askpass.exe" if os.name == "nt" else "compshare-ssh-askpass"
+    name = "compshare-ssh-askpass.exe" if _is_windows() else "compshare-ssh-askpass"
     sibling = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), name)
     if os.path.isfile(sibling) and os.access(sibling, os.X_OK):
         return sibling
@@ -193,7 +197,9 @@ def _run_with_askpass(command: List[str], password: str) -> int:
 
 def connect_with_password(argv: List[str], password: str) -> int:
     """Run SSH interactively and answer its first password prompt."""
-    if os.name == "nt" or not sys.stdin.isatty() or not sys.stdout.isatty():
+    if _is_windows():
+        return _run_with_askpass(_password_authentication(argv), password)
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise PasswordAutomationUnavailable
 
     try:

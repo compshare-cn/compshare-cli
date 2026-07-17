@@ -10,7 +10,7 @@
 - 可通过 `compshare feedback` 反馈 CLI 问题和建议
 - 基于官方 [`ucloud-sdk-python3`](https://github.com/ucloud/ucloud-sdk-python3)
 
-当前版本：`0.3.0`，要求 Python 3.9 或更高版本。
+当前版本：`0.3.1`，要求 Python 3.9 或更高版本。
 
 ## 安装
 
@@ -29,11 +29,22 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 ```
 
-Windows 激活虚拟环境时使用：
+Windows PowerShell 中可先激活虚拟环境，再直接调用 `compshare`：
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
+compshare -h
+compshare config --name default
 ```
+
+不激活虚拟环境时，使用 PowerShell 调用运算符 `&` 直接执行虚拟环境内的入口：
+
+```powershell
+& '.\.venv\Scripts\compshare.exe' -h
+& '.\.venv\Scripts\compshare.exe' config --name default
+```
+
+PowerShell 会把单引号中的路径解析为字符串，所以带参数执行时不能省略 `&`。路径包含空格时必须保留引号；从当前目录运行可执行文件时要使用 `.\` 前缀。若 `Activate.ps1` 被本机执行策略拦截，可直接使用上述不激活的写法，无需修改系统策略。
 
 ## 配置
 

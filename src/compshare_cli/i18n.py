@@ -618,6 +618,9 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Config {path}: file {file_mode}, directory {directory_mode}": (
         "配置 {path}：文件权限 {file_mode}，目录权限 {directory_mode}"
     ),
+    "Config {path}: Windows ACLs apply; POSIX permission check skipped.": (
+        "配置 {path}：由 Windows ACL 管理访问权限，已跳过 POSIX 权限位检查"
+    ),
     "Using environment credentials": "正在使用环境变量凭证",
     "Config file does not exist: {path}": "配置文件不存在：{path}",
     "Connected; {count} availability zones returned.": "连接成功，返回 {count} 个可用区。",

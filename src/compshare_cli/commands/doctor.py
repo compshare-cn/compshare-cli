@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import stat
 import sys
@@ -61,7 +62,18 @@ def run(state: Runtime) -> None:
         )
     )
 
-    if store.path.exists():
+    if store.path.exists() and platform.system() == "Windows":
+        checks.append(
+            _check(
+                "Permissions",
+                "Warning",
+                tr(
+                    "Config {path}: Windows ACLs apply; POSIX permission check skipped.",
+                    path=store.path,
+                ),
+            )
+        )
+    elif store.path.exists():
         file_mode = stat.S_IMODE(store.path.stat().st_mode)
         directory_mode = stat.S_IMODE(store.path.parent.stat().st_mode)
         permissions_ok = file_mode & 0o077 == 0 and directory_mode & 0o077 == 0

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- 补充 Windows PowerShell 虚拟环境的激活与未激活调用示例，说明 `&`、`.\` 和路径引号的使用条件。
+- `doctor` 在 Windows 上不再将无效的 POSIX 权限位当作配置泄露，改为提示由 Windows ACL 管理权限。
+- Windows 上的交互式 `instance ssh` 使用 OpenSSH askpass 自动填写 API 返回的密码，不再降级为手动输入。
+
 ## 0.3.0
 
 - `instance ssh` 默认自动填写 API 返回的登录密码，并提供 `--no-auto-password` 手动输入开关。

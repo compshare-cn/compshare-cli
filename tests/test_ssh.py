@@ -73,6 +73,39 @@ def test_connect_with_password_requires_an_interactive_terminal(monkeypatch) -> 
         raise AssertionError("expected PasswordAutomationUnavailable")
 
 
+def test_connect_with_password_uses_askpass_on_windows(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(ssh, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        ssh,
+        "_run_with_askpass",
+        lambda argv, password: calls.append((argv, password)) or 23,
+    )
+
+    exit_code = ssh.connect_with_password(
+        ["ssh", "-p", "2222", "root@example.invalid"],
+        "instance-secret",
+    )
+
+    assert exit_code == 23
+    argv, password = calls[0]
+    assert argv == [
+        "ssh",
+        "-o",
+        "PreferredAuthentications=password,keyboard-interactive",
+        "-o",
+        "PubkeyAuthentication=no",
+        "-o",
+        "NumberOfPasswordPrompts=1",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-p",
+        "2222",
+        "root@example.invalid",
+    ]
+    assert password == "instance-secret"
+
+
 def test_execute_with_password_uses_askpass_without_password_in_argv(monkeypatch) -> None:
     calls = []
     monkeypatch.delenv(ssh._ASKPASS_PASSWORD_FILE_ENV, raising=False)

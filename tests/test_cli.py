@@ -1463,3 +1463,27 @@ def test_doctor_is_read_only_and_json(monkeypatch, tmp_path) -> None:
     payload = json.loads(result.stdout)
     assert payload["ok"] is True
     assert {item["Check"] for item in payload["checks"]} >= {"Credentials", "API", "ssh"}
+
+
+def test_doctor_does_not_treat_windows_mode_bits_as_posix_permissions(
+    monkeypatch, tmp_path
+) -> None:
+    path = tmp_path / "config.json"
+    path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(path))
+    monkeypatch.setenv("COMPSHARE_PUBLIC_KEY", "public")
+    monkeypatch.setenv("COMPSHARE_PRIVATE_KEY", "private")
+    monkeypatch.setattr(doctor_module.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        doctor_module,
+        "call_captured",
+        lambda state, action, params: ({"ZoneInfo": [{"Zone": "cn-a-01"}]}, None),
+    )
+
+    result = runner.invoke(cli.app, ["--json", "doctor"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    permissions = next(item for item in payload["checks"] if item["Check"] == "Permissions")
+    assert permissions["Status"] == "Warning"
+    assert "Windows ACL" in permissions["Detail"]

@@ -10,7 +10,7 @@
 - 可通过 `compshare feedback` 反馈 CLI 问题和建议
 - 基于官方 [`ucloud-sdk-python3`](https://github.com/ucloud/ucloud-sdk-python3)
 
-当前版本：`0.3.1`，要求 Python 3.9 或更高版本。
+当前版本：`0.3.2`，要求 Python 3.9 或更高版本。
 
 ## 安装
 

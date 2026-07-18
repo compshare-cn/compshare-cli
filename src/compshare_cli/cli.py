@@ -13,8 +13,9 @@ from compshare_cli.commands import ask as ask_command
 from compshare_cli.commands import doctor as doctor_command
 from compshare_cli.commands import feedback as feedback_command
 from compshare_cli.commands import image, instance, storage, team
+from compshare_cli.commands.common import confirm
 from compshare_cli.config import DEFAULT_PROFILE, ConfigStore, Profile
-from compshare_cli.errors import CLIError
+from compshare_cli.errors import CLIError, UsageError
 from compshare_cli.i18n import configured_language, localize_command, normalize_language, tr
 from compshare_cli.insights import record_command
 from compshare_cli.output import Renderer
@@ -54,6 +55,12 @@ config_app = typer.Typer(
 app.add_typer(config_app, name="config")
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(__version__)
+        raise typer.Exit()
+
+
 @app.callback()
 def root(
     ctx: typer.Context,
@@ -72,6 +79,13 @@ def root(
         False,
         "--show-sensitive",
         help="Show passwords, IP addresses, access URLs, and login commands.",
+    ),
+    version_option: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Print the CLI version and exit.",
     ),
 ) -> None:
     """CompShare CLI."""
@@ -101,6 +115,11 @@ def config(
     """Save a CompShare API credential profile."""
     if ctx.invoked_subcommand is not None:
         return
+    state = ctx.find_root().obj
+    if state.json_output and (public_key is None or private_key is None):
+        raise UsageError(
+            tr("JSON mode cannot prompt for credentials; pass --public-key and --private-key.")
+        )
     public = public_key or typer.prompt(tr("Public key"))
     private = private_key or typer.prompt(tr("Private key"), hide_input=True)
     ConfigStore().save_profile(
@@ -108,7 +127,6 @@ def config(
         Profile(public_key=public, private_key=private),
         activate=activate,
     )
-    state = ctx.find_root().obj
     Renderer(state.json_output, state.show_sensitive).success(
         tr("Saved credential profile {name}", name=name),
         {"ok": True, "profile": name, "active": activate},
@@ -126,6 +144,11 @@ def config_set(
     ),
 ) -> None:
     """Create or update a credential profile."""
+    state = ctx.find_root().obj
+    if state.json_output and (public_key is None or private_key is None):
+        raise UsageError(
+            tr("JSON mode cannot prompt for credentials; pass --public-key and --private-key.")
+        )
     public = public_key or typer.prompt(tr("Public key"))
     private = private_key or typer.prompt(tr("Private key"), hide_input=True)
     ConfigStore().save_profile(
@@ -133,7 +156,6 @@ def config_set(
         Profile(public_key=public, private_key=private),
         activate=activate,
     )
-    state = ctx.find_root().obj
     Renderer(state.json_output, state.show_sensitive).success(
         tr("Saved credential profile {name}", name=name),
         {"ok": True, "profile": name, "active": activate},
@@ -172,8 +194,7 @@ def config_delete(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Delete a credential profile."""
-    if not yes and not typer.confirm(tr("Delete credential profile {name}?", name=name)):
-        raise typer.Abort()
+    confirm(tr("Delete credential profile {name}?", name=name), yes)
     ConfigStore().delete_profile(name)
     state = ctx.find_root().obj
     Renderer(state.json_output, state.show_sensitive).success(
@@ -193,7 +214,7 @@ def config_path_command(ctx: typer.Context) -> None:
         typer.echo(path)
 
 
-@app.command("version")
+@app.command("version", hidden=True)
 def version(ctx: typer.Context) -> None:
     """Print the CLI version."""
     state = ctx.find_root().obj
@@ -302,7 +323,14 @@ def main(args: Optional[List[str]] = None) -> None:
         Renderer("--json" in argv, show_sensitive).error(str(error))
         raise SystemExit(2) from error
     except _CLICK_EXCEPTIONS as error:
-        Renderer("--json" in argv, show_sensitive).error(error.format_message())
+        message = error.format_message()
+        if "--json" in argv and "No such option: --json" in message:
+            hint = tr(
+                "Global option --json must appear before the command, for example: "
+                "compshare --json instance list."
+            )
+            message = f"{message} {hint}"
+        Renderer("--json" in argv, show_sensitive).error(message)
         raise SystemExit(error.exit_code) from error
     except _ABORT_EXCEPTIONS as error:
         Renderer("--json" in argv, show_sensitive).error(tr("Aborted"))

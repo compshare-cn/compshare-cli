@@ -89,9 +89,14 @@ TEAM_ACTIONS = frozenset(
 
 PUBLIC_ACTIONS = INSTANCE_ACTIONS | IMAGE_ACTIONS | STORAGE_ACTIONS | TEAM_ACTIONS
 
-# Public API actions intentionally exposed as CLI placeholders until their
-# production request contract is ready.
-COMING_SOON_ACTIONS = frozenset({"GetCompShareInstanceMonitor"})
+# No unavailable API actions are currently exposed as placeholders.
+COMING_SOON_ACTIONS = frozenset()
 
-# Documented publicly but unavailable in the production API (RetCode 161).
-UNAVAILABLE_ACTIONS = frozenset({"DescribeFavoriteImages"})
+# Documented publicly but unavailable in the production API.
+UNAVAILABLE_ACTIONS = frozenset(
+    {
+        "DescribeFavoriteImages",
+        "GetCompShareInstanceMonitor",
+        "GetSoftwareURL",
+    }
+)

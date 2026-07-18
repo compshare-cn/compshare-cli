@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- `--json instance scp` 现在会真实上传，并返回结构化执行结果；`--print` 保持为仅预览。
+- JSON 模式不再启动凭证或危险操作确认提示；需要确认的操作必须显式传入 `--yes`。
+- 交互确认在空输入或无效输入时最多重试三次。
+- 增加标准 `--version` 选项，并改进全局 `--json` 位置错误提示。
+- 实例列表按地域筛选时要求同时指定 `--region` 和 `--zone`，确保调用正确的 Zone 接口。
+- `instance show` 显示实例软件入口；URL 默认脱敏，使用 `--show-sensitive` 后显示。
+- `instance show` 支持按 IP、软件、规格、磁盘、计费、镜像和状态分组聚焦输出，并允许组合查询。
+- 增加纯客户端的实例配置模板；支持本地创建、列表、查看、删除，以及通过
+  `instance create --template NAME` 加载并用显式参数覆盖模板值。
+- 移除当前不可用的 `instance monitor` 和独立 `instance software url` 命令。
+
 ## 0.3.2
 
 - JSON 模式远程命令返回结构化的退出码、标准输出、标准错误及连接/认证错误，不再只打印 SSH 命令。

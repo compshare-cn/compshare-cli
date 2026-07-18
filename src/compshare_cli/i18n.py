@@ -30,9 +30,22 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Language: zh or en.": "语言：zh 或 en。",
     "Save a CompShare API credential profile.": "保存优云智算 API 凭证配置。",
     "Print the CLI version.": "显示 CLI 版本。",
+    "Print the CLI version and exit.": "显示 CLI 版本并退出。",
     "Ask a CompShare product question.": "询问优云智算产品问题。",
     "Question to answer.": "需要回答的问题。",
     "Manage GPU instances.": "管理 GPU 实例。",
+    "Manage local instance configuration templates.": "管理本地实例配置模板。",
+    "List local instance templates.": "列出本地实例模板。",
+    "Show a local instance template.": "显示本地实例模板。",
+    "Create a local instance template.": "创建本地实例模板。",
+    "Delete a local instance template.": "删除本地实例模板。",
+    "Print the local instance template file path.": "显示本地实例模板文件路径。",
+    "Template name.": "模板名称。",
+    "Template description.": "模板说明。",
+    "Local instance template name; explicit options override template values.": (
+        "本地实例模板名称；本次显式参数优先覆盖模板值。"
+    ),
+    "Replace an existing template.": "覆盖已有模板。",
     "Search legal specifications and, with --image, real inventory.": (
         "查询合法规格；指定 --image 时检查真实库存。"
     ),
@@ -55,6 +68,13 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Project ID for this request.": "本次请求使用的项目 ID。",
     "Show full instance details.": "显示实例完整信息。",
     "Instance ID.": "实例 ID。",
+    "Show only instance IP information.": "只显示实例 IP 信息。",
+    "Show only exposed software applications and URLs.": "只显示对外开放的软件及其 URL。",
+    "Show only compute specifications.": "只显示计算规格。",
+    "Show only disk and volume information.": "只显示磁盘和存储卷信息。",
+    "Show only billing information.": "只显示计费信息。",
+    "Show only image information.": "只显示镜像信息。",
+    "Show only state and lifecycle times.": "只显示状态和生命周期时间。",
     "Create instances interactively, or use explicit options for automation.": (
         "通过交互向导创建实例，也可显式传参用于自动化。"
     ),
@@ -166,6 +186,10 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "New password": "新密码",
     "Select": "请选择",
     "Aborted": "操作已取消",
+    "Please enter y or n.": "请输入 y 或 n。",
+    "JSON mode cannot prompt for confirmation; pass --yes to confirm the operation.": (
+        "JSON 模式不能交互确认；请传入 --yes 确认执行操作。"
+    ),
     "Attach US3 during container creation.": "创建容器实例时挂载 US3。",
     "Attached instance ID.": "已挂载的实例 ID。",
     "Backup mode: NONE, DATAARK or SNAPSHOT.": "备份模式：NONE、DATAARK 或 SNAPSHOT。",
@@ -241,6 +265,12 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Visibility: 0 private, 1 public.": "可见性：0 私有，1 公开。",
     "Whether the image supports automatic startup.": "镜像是否支持自动启动。",
     "Saved credential profile {name}": "已保存凭证配置 {name}",
+    "Saved instance template {name}": "已保存实例模板 {name}",
+    "Delete local instance template {name}?": "删除本地实例模板 {name}？",
+    "Deleted instance template {name}": "已删除实例模板 {name}",
+    "Instance template": "实例模板",
+    "PARAMETERS": "参数",
+    "UPDATED": "更新时间",
     "Invalid memory size: {value}. Example: 64GiB": "无效的内存大小：{value}。示例：64GiB",
     "Memory must be positive and resolve to whole GiB.": "内存必须大于 0，且换算后为整数 GiB。",
     "Invalid disk size: {value}. Example: 100GiB": "无效的磁盘大小：{value}。示例：100GiB",
@@ -304,6 +334,39 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "VRAM": "显存",
     "IN STOCK": "有库存",
     "CPU PLATFORM": "CPU 平台",
+    "CPU ARCH": "CPU 架构",
+    "IP SET": "IP 信息",
+    "INSTANCE TYPE": "实例类型",
+    "MACHINE TYPE": "机型",
+    "SUPPORT WITHOUT GPU START": "支持无卡启动",
+    "DISKS": "磁盘",
+    "VOLUMES": "存储卷",
+    "TOTAL DISK SPACE": "数据盘总空间",
+    "TOTAL VOLUME SPACE": "共享存储总空间",
+    "INSTANCE PRICE": "实例价格",
+    "IMAGE PRICE": "镜像价格",
+    "DISK PRICE": "磁盘价格",
+    "DISK PRICE INFO": "磁盘计费详情",
+    "DISCOUNT TYPE": "折扣类型",
+    "AUTO RENEW": "自动续费",
+    "IS EXPIRE": "是否过期",
+    "EXPIRE TIME": "到期时间",
+    "POWER-OFF BILLING": "关机后计费资源",
+    "IMAGE NAME": "镜像名称",
+    "IMAGE TYPE": "镜像类型",
+    "IMAGE VERSION": "镜像版本",
+    "IMAGE STATUS": "镜像状态",
+    "IMAGE AUTHOR": "镜像作者",
+    "OS": "操作系统",
+    "OS TYPE": "操作系统类型",
+    "BASIC IMAGE": "基础镜像",
+    "BASIC IMAGE NAME": "基础镜像名称",
+    "CREATE TIME": "创建时间",
+    "START TIME": "启动时间",
+    "STOP TIME": "关机时间",
+    "UPDATE TIME": "更新时间",
+    "SCHEDULER STOP TIME": "定时关机时间",
+    "RELEASE TIME": "释放时间",
     "DESCRIPTION": "描述",
     "INSTANCE": "实例",
     "IMAGE": "镜像",
@@ -339,6 +402,10 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Filter by GPU type.": "按 GPU 型号筛选。",
     "Filter by billing type.": "按计费方式筛选。",
     "Filter by region.": "按地域筛选。",
+    "Filter by region; must be used with --zone.": "按地域筛选，必须与 --zone 同时使用。",
+    "Filter by availability zone; must be used with --region.": (
+        "按可用区筛选，必须与 --region 同时使用。"
+    ),
     "Region for this request.": "本次请求的地域。",
     "Unix timestamp, ISO 8601, or relative time.": "Unix 时间戳、ISO 8601 或相对时间。",
     "Override the automatically detected project ID.": "覆盖自动检测的项目 ID。",
@@ -397,6 +464,13 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     ): (
         "JSON 模式不会启动交互向导，请指定 --gpu、--count、--cpu、--memory、--image、"
         "--region 和 --zone。"
+    ),
+    "JSON mode cannot prompt for credentials; pass --public-key and --private-key.": (
+        "JSON 模式不能交互读取凭证；请传入 --public-key 和 --private-key。"
+    ),
+    "Global option --json must appear before the command, for example: "
+    "compshare --json instance list.": (
+        "全局选项 --json 必须放在命令之前，例如：compshare --json instance list。"
     ),
     (
         "No inventory is available for the selected GPU, CPU, memory, image, billing, "

@@ -17,6 +17,7 @@ from compshare_cli.commands.common import confirm, confirm_details, request, run
 from compshare_cli.config import ConfigStore
 from compshare_cli.errors import UsageError
 from compshare_cli.i18n import tr
+from compshare_cli.instance_templates import InstanceTemplateStore, template_path
 from compshare_cli.location import instance_location, locate_instance, supported_locations
 from compshare_cli.output import Renderer
 from compshare_cli.parsing import (
@@ -32,6 +33,8 @@ from compshare_cli.runtime import Runtime
 from compshare_cli.ssh import (
     PasswordAutomationUnavailable,
     connect_with_password,
+    copy_captured,
+    copy_captured_with_password,
     copy_with_password,
     execute_captured,
     execute_captured_with_password,
@@ -44,9 +47,13 @@ app = typer.Typer(help="Manage GPU instances.", no_args_is_help=True)
 ports_app = typer.Typer(help="Manage container port mappings.", no_args_is_help=True)
 schedule_app = typer.Typer(help="Manage scheduled shutdowns.", no_args_is_help=True)
 software_app = typer.Typer(help="Discover software exposed by instances.", no_args_is_help=True)
+template_app = typer.Typer(
+    help="Manage local instance configuration templates.", no_args_is_help=True
+)
 app.add_typer(ports_app, name="ports")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(software_app, name="software")
+app.add_typer(template_app, name="template")
 
 INSTANCE_COLUMNS = (
     ("UHostId", "ID"),
@@ -62,6 +69,63 @@ INSTANCE_COLUMNS = (
     ("InstancePrice", "PRICE/H"),
 )
 
+INSTANCE_SHOW_SECTION_KEYS = {
+    "ip": ("IPSet",),
+    "softwares": ("Softwares",),
+    "spec": (
+        "InstanceType",
+        "MachineType",
+        "GpuType",
+        "GPU",
+        "GraphicsMemory",
+        "CPU",
+        "Memory",
+        "CpuPlatform",
+        "CpuArch",
+        "SupportWithoutGpuStart",
+    ),
+    "disks": (
+        "DiskSet",
+        "UDiskSet",
+        "VolumeSet",
+        "TotalDiskSpace",
+        "TotalVolumeSpace",
+    ),
+    "billing": (
+        "ChargeType",
+        "InstancePrice",
+        "CompShareImagePrice",
+        "DiskPrice",
+        "DiskPriceInfo",
+        "DiscountType",
+        "AutoRenew",
+        "IsExpire",
+        "ExpireTime",
+        "PostPayPowerOffBillingResource",
+    ),
+    "image": (
+        "CompShareImageId",
+        "CompShareImageName",
+        "CompShareImageType",
+        "CompShareImageVersionName",
+        "CompShareImageStatus",
+        "CompShareImageAuthor",
+        "OsName",
+        "OsType",
+        "BasicImageId",
+        "BasicImageName",
+    ),
+    "status": (
+        "State",
+        "CreateTime",
+        "StartTime",
+        "StopTime",
+        "UpdateTime",
+        "SchedulerStopTime",
+        "ReleaseTime",
+    ),
+}
+
 Choice = TypeVar("Choice")
 
 
@@ -71,6 +135,114 @@ def _instance_rows(response: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
         memory = row.get("Memory")
         row["MemoryDisplay"] = f"{memory // 1024}GiB" if isinstance(memory, int) else memory
         yield row
+
+
+def _memory_display(value: Any) -> Any:
+    return f"{value // 1024}GiB" if isinstance(value, int) else value
+
+
+def _default_instance_fields(
+    host: Dict[str, Any],
+    region: str,
+    zone: str,
+) -> List[Tuple[str, Any]]:
+    return [
+        ("ID", host.get("UHostId")),
+        ("NAME", host.get("Name")),
+        ("STATE", host.get("State")),
+        ("GPU", f"{host.get('GpuType', '-')} × {host.get('GPU', '-')}"),
+        ("CPU", host.get("CPU")),
+        ("MEMORY", _memory_display(host.get("Memory"))),
+        ("REGION", region),
+        ("ZONE", zone),
+        ("CHARGE", host.get("ChargeType")),
+        ("IMAGE", host.get("CompShareImageId") or host.get("ImageId")),
+        ("Password", host.get("Password")),
+        ("SSH", host.get("SshLoginCommand")),
+        ("SOFTWARE", host.get("Softwares") or None),
+        ("DATA DISKS", host.get("DiskSet") or host.get("UDiskSet")),
+    ]
+
+
+def _focused_instance_fields(
+    host: Dict[str, Any],
+    sections: Sequence[str],
+) -> List[Tuple[str, Any]]:
+    fields: List[Tuple[str, Any]] = []
+    for section in sections:
+        if section == "ip":
+            fields.append(("IP SET", host.get("IPSet")))
+        elif section == "softwares":
+            fields.append(("SOFTWARE", host.get("Softwares")))
+        elif section == "spec":
+            fields.extend(
+                [
+                    ("INSTANCE TYPE", host.get("InstanceType")),
+                    ("MACHINE TYPE", host.get("MachineType")),
+                    ("GPU", f"{host.get('GpuType', '-')} × {host.get('GPU', '-')}"),
+                    ("VRAM", host.get("GraphicsMemory")),
+                    ("CPU", host.get("CPU")),
+                    ("MEMORY", _memory_display(host.get("Memory"))),
+                    ("CPU PLATFORM", host.get("CpuPlatform")),
+                    ("CPU ARCH", host.get("CpuArch")),
+                    ("SUPPORT WITHOUT GPU START", host.get("SupportWithoutGpuStart")),
+                ]
+            )
+        elif section == "disks":
+            fields.extend(
+                [
+                    ("DISKS", host.get("DiskSet") or host.get("UDiskSet")),
+                    ("VOLUMES", host.get("VolumeSet")),
+                    ("TOTAL DISK SPACE", host.get("TotalDiskSpace")),
+                    ("TOTAL VOLUME SPACE", host.get("TotalVolumeSpace")),
+                ]
+            )
+        elif section == "billing":
+            fields.extend(
+                [
+                    ("CHARGE", host.get("ChargeType")),
+                    ("INSTANCE PRICE", host.get("InstancePrice")),
+                    ("IMAGE PRICE", host.get("CompShareImagePrice")),
+                    ("DISK PRICE", host.get("DiskPrice")),
+                    ("DISK PRICE INFO", host.get("DiskPriceInfo")),
+                    ("DISCOUNT TYPE", host.get("DiscountType")),
+                    ("AUTO RENEW", host.get("AutoRenew")),
+                    ("IS EXPIRE", host.get("IsExpire")),
+                    ("EXPIRE TIME", host.get("ExpireTime")),
+                    (
+                        "POWER-OFF BILLING",
+                        host.get("PostPayPowerOffBillingResource"),
+                    ),
+                ]
+            )
+        elif section == "image":
+            fields.extend(
+                [
+                    ("IMAGE", host.get("CompShareImageId")),
+                    ("IMAGE NAME", host.get("CompShareImageName")),
+                    ("IMAGE TYPE", host.get("CompShareImageType")),
+                    ("IMAGE VERSION", host.get("CompShareImageVersionName")),
+                    ("IMAGE STATUS", host.get("CompShareImageStatus")),
+                    ("IMAGE AUTHOR", host.get("CompShareImageAuthor")),
+                    ("OS", host.get("OsName")),
+                    ("OS TYPE", host.get("OsType")),
+                    ("BASIC IMAGE", host.get("BasicImageId")),
+                    ("BASIC IMAGE NAME", host.get("BasicImageName")),
+                ]
+            )
+        elif section == "status":
+            fields.extend(
+                [
+                    ("STATE", host.get("State")),
+                    ("CREATE TIME", host.get("CreateTime")),
+                    ("START TIME", host.get("StartTime")),
+                    ("STOP TIME", host.get("StopTime")),
+                    ("UPDATE TIME", host.get("UpdateTime")),
+                    ("SCHEDULER STOP TIME", host.get("SchedulerStopTime")),
+                    ("RELEASE TIME", host.get("ReleaseTime")),
+                ]
+            )
+    return fields
 
 
 def _search_rows(
@@ -501,6 +673,192 @@ def _create_charge(charge: Optional[str]) -> str:
     )
 
 
+@template_app.command("list", help="List local instance templates.")
+def list_templates(ctx: typer.Context) -> None:
+    state = runtime(ctx)
+    templates = InstanceTemplateStore().list()
+    rows = []
+    for template in templates:
+        parameters = template["parameters"]
+        rows.append(
+            {
+                "Name": template["name"],
+                "Description": template["description"],
+                "Gpu": parameters.get("gpu"),
+                "Count": parameters.get("count"),
+                "Cpu": parameters.get("cpu"),
+                "Memory": parameters.get("memory"),
+                "Region": parameters.get("region"),
+                "Zone": parameters.get("zone"),
+                "Updated": template["updated_at"],
+            }
+        )
+    Renderer(state.json_output, state.show_sensitive).data(
+        {"templates": templates, "path": str(template_path())},
+        rows=rows,
+        columns=(
+            ("Name", "NAME"),
+            ("Description", "DESCRIPTION"),
+            ("Gpu", "GPU"),
+            ("Count", "COUNT"),
+            ("Cpu", "CPU"),
+            ("Memory", "MEMORY"),
+            ("Region", "REGION"),
+            ("Zone", "ZONE"),
+            ("Updated", "UPDATED"),
+        ),
+    )
+
+
+@template_app.command("show", help="Show a local instance template.")
+def show_template(
+    ctx: typer.Context, name: str = typer.Argument(..., help="Template name.")
+) -> None:
+    state = runtime(ctx)
+    template = InstanceTemplateStore().get(name)
+    parameters = template["parameters"]
+    Renderer(state.json_output, state.show_sensitive).details(
+        "Instance template",
+        [
+            ("NAME", template["name"]),
+            ("DESCRIPTION", template["description"]),
+            ("GPU", parameters.get("gpu")),
+            ("COUNT", parameters.get("count")),
+            ("CPU", parameters.get("cpu")),
+            ("MEMORY", parameters.get("memory")),
+            ("IMAGE", parameters.get("image")),
+            ("REGION", parameters.get("region")),
+            ("ZONE", parameters.get("zone")),
+            ("PARAMETERS", parameters),
+            ("UPDATED", template["updated_at"]),
+        ],
+        response=template,
+    )
+
+
+@template_app.command("create", help="Create a local instance template.")
+def create_template(
+    ctx: typer.Context,
+    template_name: str = typer.Argument(..., help="Template name."),
+    description: Optional[str] = typer.Option(None, help="Template description."),
+    gpu: Optional[str] = typer.Option(None, "--gpu", help="GPU type, for example 4090."),
+    count: Optional[int] = typer.Option(None, "--count", min=1, help="GPU count."),
+    cpu: Optional[int] = typer.Option(None, "--cpu", min=1, help="CPU core count."),
+    memory: Optional[str] = typer.Option(None, "--memory", help="Memory, for example 64GiB."),
+    image: Optional[str] = typer.Option(None, "--image", help="CompShare image ID."),
+    image_source: Optional[str] = typer.Option(
+        None,
+        "--image-source",
+        help="Image source: platform, custom, community or shared.",
+    ),
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
+    boot_disk: Optional[str] = typer.Option(None, "--disk", help="Boot disk size."),
+    boot_type: Optional[str] = typer.Option(None, "--disk-type", help="Boot disk type."),
+    data_disk: Optional[List[str]] = typer.Option(
+        None,
+        "--data-disk",
+        help="Data disk as SIZE[:TYPE]; repeatable.",
+    ),
+    charge: Optional[str] = typer.Option(None, "--charge", help="Billing type."),
+    quantity: Optional[int] = typer.Option(
+        None,
+        "--quantity",
+        min=1,
+        help="Billing duration for prepaid modes.",
+    ),
+    instance_name: Optional[str] = typer.Option(
+        None,
+        "--instance-name",
+        help="Instance name.",
+    ),
+    platform: Optional[str] = typer.Option(
+        None,
+        "--platform",
+        help="Minimum CPU platform.",
+    ),
+    remark: Optional[str] = typer.Option(None, help="Instance remark."),
+    firewall: Optional[str] = typer.Option(None, "--firewall", help="Security group ID."),
+    max_count: Optional[int] = typer.Option(
+        None,
+        "--max-count",
+        min=1,
+        help="Number of instances.",
+    ),
+    us3: Optional[bool] = typer.Option(
+        None,
+        "--us3/--no-us3",
+        help="Attach US3 during container creation.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Replace an existing template."),
+) -> None:
+    if memory is not None:
+        memory_mib(memory)
+    if boot_disk is not None:
+        disk_gib(boot_disk)
+    for specification in data_disk or []:
+        disk_gib(specification.split(":", 1)[0])
+    parameters = compact(
+        {
+            "gpu": gpu,
+            "count": count,
+            "cpu": cpu,
+            "memory": memory,
+            "image": image,
+            "image_source": image_source,
+            "region": region,
+            "zone": zone,
+            "disk": boot_disk,
+            "disk_type": boot_type,
+            "data_disk": data_disk,
+            "charge": charge,
+            "quantity": quantity,
+            "name": instance_name,
+            "platform": platform,
+            "remark": remark,
+            "firewall": firewall,
+            "max_count": max_count,
+            "us3": us3,
+        }
+    )
+    state = runtime(ctx)
+    template = InstanceTemplateStore().save(
+        template_name,
+        parameters,
+        description=description,
+        overwrite=force,
+    )
+    Renderer(state.json_output, state.show_sensitive).success(
+        tr("Saved instance template {name}", name=template_name),
+        template,
+    )
+
+
+@template_app.command("delete", help="Delete a local instance template.")
+def delete_template(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Template name."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+) -> None:
+    state = runtime(ctx)
+    confirm(tr("Delete local instance template {name}?", name=name), yes)
+    InstanceTemplateStore().delete(name)
+    Renderer(state.json_output, state.show_sensitive).success(
+        tr("Deleted instance template {name}", name=name),
+        {"ok": True, "name": name},
+    )
+
+
+@template_app.command("path", help="Print the local instance template file path.")
+def template_path_command(ctx: typer.Context) -> None:
+    state = runtime(ctx)
+    path = template_path()
+    if state.json_output:
+        Renderer(True, state.show_sensitive).data({"path": str(path)})
+    else:
+        typer.echo(path)
+
+
 @app.command("search")
 def search(
     ctx: typer.Context,
@@ -618,8 +976,16 @@ def families(ctx: typer.Context) -> None:
 def list_instances(
     ctx: typer.Context,
     ids: Optional[List[str]] = typer.Option(None, "--id", help="Instance ID; repeatable."),
-    region: Optional[str] = typer.Option(None, "--region", help="Filter by region."),
-    zone: Optional[str] = typer.Option(None, "--zone", help="Filter by availability zone."),
+    region: Optional[str] = typer.Option(
+        None,
+        "--region",
+        help="Filter by region; must be used with --zone.",
+    ),
+    zone: Optional[str] = typer.Option(
+        None,
+        "--zone",
+        help="Filter by availability zone; must be used with --region.",
+    ),
     limit: int = typer.Option(20, min=1, max=100, help="Maximum number of results."),
     offset: int = typer.Option(0, min=0, help="Number of results to skip."),
     all_results: bool = typer.Option(False, "--all", help="Return all results."),
@@ -640,8 +1006,8 @@ def list_instances(
 ) -> None:
     """List instances."""
     state = runtime(ctx)
-    if zone is not None and region is None:
-        raise UsageError(tr("--zone requires --region."))
+    if (region is None) != (zone is None):
+        raise UsageError(tr("--region and --zone must be provided together."))
     params = request(ctx, region_value=region)
     params.update(
         compact(
@@ -692,33 +1058,48 @@ def list_instances(
 
 
 @app.command("show")
-def show(ctx: typer.Context, instance: str = typer.Argument(..., help="Instance ID.")) -> None:
+def show(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="Instance ID."),
+    ip: bool = typer.Option(False, "--ip", help="Show only instance IP information."),
+    softwares: bool = typer.Option(
+        False,
+        "--softwares",
+        help="Show only exposed software applications and URLs.",
+    ),
+    spec: bool = typer.Option(False, "--spec", help="Show only compute specifications."),
+    disks: bool = typer.Option(False, "--disks", help="Show only disk and volume information."),
+    billing: bool = typer.Option(False, "--billing", help="Show only billing information."),
+    image: bool = typer.Option(False, "--image", help="Show only image information."),
+    status: bool = typer.Option(False, "--status", help="Show only state and lifecycle times."),
+) -> None:
     """Show full instance details."""
     state = runtime(ctx)
     region, zone, host = locate_instance(state, instance)
-    response = {"UHostSet": [host]}
+    selected_sections = [
+        name
+        for name, enabled in (
+            ("ip", ip),
+            ("softwares", softwares),
+            ("spec", spec),
+            ("disks", disks),
+            ("billing", billing),
+            ("image", image),
+            ("status", status),
+        )
+        if enabled
+    ]
+    if selected_sections:
+        keys = {key for section in selected_sections for key in INSTANCE_SHOW_SECTION_KEYS[section]}
+        response_host = {key: value for key, value in host.items() if key in keys}
+        fields = _focused_instance_fields(host, selected_sections)
+    else:
+        response_host = host
+        fields = _default_instance_fields(host, region, zone)
+    response = {"UHostSet": [response_host]}
     Renderer(state.json_output, state.show_sensitive).details(
         "Instance details",
-        [
-            ("ID", host.get("UHostId")),
-            ("NAME", host.get("Name")),
-            ("STATE", host.get("State")),
-            ("GPU", f"{host.get('GpuType', '-')} × {host.get('GPU', '-')}"),
-            ("CPU", host.get("CPU")),
-            (
-                "MEMORY",
-                f"{host.get('Memory', 0) // 1024}GiB"
-                if isinstance(host.get("Memory"), int)
-                else host.get("Memory"),
-            ),
-            ("REGION", region),
-            ("ZONE", zone),
-            ("CHARGE", host.get("ChargeType")),
-            ("IMAGE", host.get("CompShareImageId") or host.get("ImageId")),
-            ("Password", host.get("Password")),
-            ("SSH", host.get("SshLoginCommand")),
-            ("DATA DISKS", host.get("DiskSet") or host.get("UDiskSet")),
-        ],
+        fields,
         response=response,
     )
 
@@ -726,6 +1107,11 @@ def show(ctx: typer.Context, instance: str = typer.Argument(..., help="Instance 
 @app.command("create")
 def create(
     ctx: typer.Context,
+    template_name: Optional[str] = typer.Option(
+        None,
+        "--template",
+        help="Local instance template name; explicit options override template values.",
+    ),
     gpu: Optional[str] = typer.Option(None, "--gpu", help="GPU type, for example 4090."),
     count: Optional[int] = typer.Option(None, "--count", min=1, help="GPU count."),
     cpu: Optional[int] = typer.Option(None, "--cpu", min=1, help="CPU core count."),
@@ -754,13 +1140,26 @@ def create(
         help="Data disk as SIZE[:TYPE]; repeatable.",
     ),
     charge: Optional[str] = typer.Option(None, "--charge", help="Billing type."),
-    quantity: int = typer.Option(1, min=1, help="Billing duration for prepaid modes."),
+    quantity: Optional[int] = typer.Option(
+        None,
+        min=1,
+        help="Billing duration for prepaid modes.",
+    ),
     name: Optional[str] = typer.Option(None, help="Instance name."),
-    platform: str = typer.Option("Auto", "--platform", help="Minimum CPU platform."),
+    platform: Optional[str] = typer.Option(None, "--platform", help="Minimum CPU platform."),
     remark: Optional[str] = typer.Option(None, help="Instance remark."),
     firewall: Optional[str] = typer.Option(None, "--firewall", help="Security group ID."),
-    max_count: int = typer.Option(1, "--max-count", min=1, help="Number of instances."),
-    us3: bool = typer.Option(False, "--us3", help="Attach US3 during container creation."),
+    max_count: Optional[int] = typer.Option(
+        None,
+        "--max-count",
+        min=1,
+        help="Number of instances.",
+    ),
+    us3: Optional[bool] = typer.Option(
+        None,
+        "--us3/--no-us3",
+        help="Attach US3 during container creation.",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -781,6 +1180,36 @@ def create(
 ) -> None:
     """Create instances interactively, or use explicit options for automation."""
     state = runtime(ctx)
+    template_parameters: Dict[str, Any] = {}
+    if template_name is not None:
+        template_parameters = InstanceTemplateStore().get(template_name)["parameters"]
+
+    gpu = gpu if gpu is not None else template_parameters.get("gpu")
+    count = count if count is not None else template_parameters.get("count")
+    cpu = cpu if cpu is not None else template_parameters.get("cpu")
+    memory = memory if memory is not None else template_parameters.get("memory")
+    image = image if image is not None else template_parameters.get("image")
+    image_source = (
+        image_source if image_source is not None else template_parameters.get("image_source")
+    )
+    region = region if region is not None else template_parameters.get("region")
+    zone = zone if zone is not None else template_parameters.get("zone")
+    boot_disk = boot_disk if boot_disk is not None else template_parameters.get("disk")
+    boot_type = boot_type if boot_type is not None else template_parameters.get("disk_type")
+    data_disk = data_disk if data_disk is not None else template_parameters.get("data_disk")
+    charge = charge if charge is not None else template_parameters.get("charge")
+    quantity = quantity if quantity is not None else template_parameters.get("quantity")
+    name = name if name is not None else template_parameters.get("name")
+    platform = platform if platform is not None else template_parameters.get("platform")
+    remark = remark if remark is not None else template_parameters.get("remark")
+    firewall = firewall if firewall is not None else template_parameters.get("firewall")
+    max_count = max_count if max_count is not None else template_parameters.get("max_count")
+    us3 = us3 if us3 is not None else template_parameters.get("us3")
+
+    resolved_quantity = int(quantity if quantity is not None else 1)
+    resolved_platform = str(platform if platform is not None else "Auto")
+    resolved_max_count = int(max_count if max_count is not None else 1)
+    resolved_us3 = bool(us3) if us3 is not None else False
     interactive = any(value is None for value in (gpu, count, cpu, memory, image, region, zone))
     if interactive and state.json_output:
         raise UsageError(
@@ -822,7 +1251,7 @@ def create(
         {
             "GpuType": resolved_gpu,
             "MachineType": "G",
-            "MinimalCpuPlatform": platform,
+            "MinimalCpuPlatform": resolved_platform,
             "CompShareImageId": resolved_image,
             "ChargeType": resolved_charge,
             "Disks": disks,
@@ -874,11 +1303,11 @@ def create(
             "ChargeType": resolved_charge,
             "Disks": disks,
             "CompShareImageId": resolved_image,
-            "Quantity": quantity,
+            "Quantity": resolved_quantity,
         }
     )
     price = call(state, "GetCompShareInstancePrice", price_params)
-    amount = _price_total(price, max_count)
+    amount = _price_total(price, resolved_max_count)
     price_text = "unknown" if amount is None else format(amount.normalize(), "f")
     price_limit = money(max_price) if max_price is not None else None
     if price_limit is not None and amount is None:
@@ -901,16 +1330,16 @@ def create(
                 "CPU": resolved_cpu,
                 "Memory": memory_mb,
                 "MachineType": "G",
-                "MinimalCpuPlatform": platform,
+                "MinimalCpuPlatform": resolved_platform,
                 "CompShareImageId": resolved_image,
                 "Disks": disks,
                 "ChargeType": resolved_charge,
-                "Quantity": quantity,
+                "Quantity": resolved_quantity,
                 "Name": name,
                 "Remark": remark,
                 "SecurityGroupId": firewall,
-                "MaxCount": max_count,
-                "EnableUS3": us3 if us3 else None,
+                "MaxCount": resolved_max_count,
+                "EnableUS3": resolved_us3 if resolved_us3 else None,
             }
         )
     )
@@ -924,9 +1353,10 @@ def create(
         "CompShareImageId": resolved_image,
         "Disks": disks,
         "ChargeType": resolved_charge,
-        "MaxCount": max_count,
+        "MaxCount": resolved_max_count,
     }
     plan = {
+        "template": template_name,
         "dry_run": dry_run,
         "max_price": str(price_limit) if price_limit is not None else None,
         "selection": selection,
@@ -945,7 +1375,7 @@ def create(
                 ("IMAGE", resolved_image),
                 ("SYSTEM DISK", f"{resolved_boot_disk}:{resolved_boot_type}"),
                 ("CHARGE", resolved_charge),
-                ("COUNT", max_count),
+                ("COUNT", resolved_max_count),
                 ("PRICE", price_text),
             ],
             response=plan,
@@ -962,7 +1392,7 @@ def create(
             ("IMAGE", resolved_image),
             ("SYSTEM DISK", f"{resolved_boot_disk}:{resolved_boot_type}"),
             ("CHARGE", resolved_charge),
-            ("COUNT", max_count),
+            ("COUNT", resolved_max_count),
             ("PRICE", price_text),
         ],
         "Confirm this operation?",
@@ -1601,18 +2031,6 @@ def refund(ctx: typer.Context, instances: List[str] = typer.Argument(...)) -> No
     )
 
 
-@app.command(
-    "monitor",
-    help="Get instance monitoring data (coming soon).",
-)
-def monitor(
-    ctx: typer.Context,
-    instances: Optional[List[str]] = typer.Argument(None),
-    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
-) -> None:
-    raise UsageError(tr("Instance monitoring is coming soon."))
-
-
 @app.command("charge", help="Change an instance billing type.")
 def charge(
     ctx: typer.Context,
@@ -1780,18 +2198,6 @@ def list_software(
         list_key="SoftwarePort",
         columns=(("Software", "SOFTWARE"), ("Port", "PORT")),
     )
-
-
-@software_app.command(
-    "url",
-    help="Get an instance software access URL (currently unavailable in production).",
-)
-def software_url(ctx: typer.Context, instance: str, software: str) -> None:
-    state = runtime(ctx)
-    region, zone, _ = locate_instance(state, instance)
-    params = request(ctx, zone=True, region_value=region, zone_value=zone)
-    params.update({"UHostId": instance, "Software": software})
-    invoke(state, "GetSoftwareURL", params)
 
 
 @app.command("ssh", help="Open or print an instance SSH command.")
@@ -1981,7 +2387,7 @@ def scp(
     except ValueError as exc:
         raise UsageError(tr("The instance SSH login command cannot be used for SCP.")) from exc
 
-    if print_only or state.json_output:
+    if print_only:
         Renderer(state.json_output, state.show_sensitive).data(
             {
                 "instance": instance,
@@ -1989,6 +2395,32 @@ def scp(
             }
         )
         return
+    if state.json_output:
+        execution = (
+            copy_captured_with_password(argv, str(password))
+            if password and auto_password
+            else copy_captured(argv)
+        )
+        error = None
+        if not execution.ok:
+            message = execution.stderr.strip() or f"SCP exited with status {execution.exit_code}."
+            error = {
+                "phase": execution.phase,
+                "code": execution.error_code,
+                "message": message,
+            }
+        Renderer(True, state.show_sensitive).data(
+            {
+                "instance": instance,
+                "ok": execution.ok,
+                "phase": execution.phase,
+                "exit_code": execution.exit_code,
+                "stdout": execution.stdout,
+                "stderr": execution.stderr,
+                "error": error,
+            }
+        )
+        raise typer.Exit(execution.exit_code)
     if password and state.show_sensitive:
         typer.echo(f"Password: {password}")
     if password and auto_password:

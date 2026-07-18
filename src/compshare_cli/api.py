@@ -228,10 +228,6 @@ def error_hint(action: str, code: int) -> Optional[str]:
         ("GetCompShareInstanceMonitor", 230): (
             "This production endpoint is currently incompatible; use the console for monitoring."
         ),
-        ("GetSoftwareURL", 230): (
-            "This production endpoint currently rejects its action; "
-            "use instance show or the console."
-        ),
     }
     return tr(hints[(action, code)]) if (action, code) in hints else None
 

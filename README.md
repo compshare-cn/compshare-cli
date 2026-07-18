@@ -17,6 +17,7 @@
 ```bash
 pip install compshare-cli
 compshare -h
+compshare --version
 ```
 
 本地开发：
@@ -76,6 +77,11 @@ compshare instance search --region cn-sh2 --zone cn-sh2-02 \
   --gpu 4090 --image IMAGE_ID --available
 compshare instance list --all
 
+# 聚焦查看实例信息；多个分组可组合
+compshare instance show INSTANCE_ID --ip --softwares
+compshare instance show INSTANCE_ID --spec --disks --billing
+compshare instance show INSTANCE_ID --image --status
+
 # 交互式创建
 compshare instance create
 
@@ -122,6 +128,33 @@ compshare instance create \
 ```
 
 使用 `--dry-run` 只检查库存、价格和请求，不创建资源。
+
+本地实例模板可以保存常用创建参数，不依赖控制台或后端模板接口：
+
+```bash
+compshare instance template create training-4090 \
+  --description '4090 训练环境' \
+  --gpu 4090 \
+  --count 1 \
+  --cpu 16 \
+  --memory 64GiB \
+  --image IMAGE_ID \
+  --region cn-sh2 \
+  --zone cn-sh2-02 \
+  --disk 100GiB \
+  --charge Postpay
+
+compshare instance template list
+compshare instance template show training-4090
+compshare instance create --template training-4090 --yes
+
+# 本次显式参数优先于模板值
+compshare instance create --template training-4090 --cpu 32 --memory 128GiB --yes
+```
+
+模板存放在 `~/.config/compshare/instance-templates.json`；可用
+`compshare instance template path` 查看实际路径。模板只保存实例创建参数，不保存 API
+凭证、`--yes`、`--show-sensitive` 或其他执行控制选项。
 
 ## 功能入口
 
@@ -179,11 +212,13 @@ compshare --json --show-sensitive instance show uhost-xxxxxxxx
 JSON 模式不会启动交互向导。生命周期操作可使用 `--wait`、`--no-wait` 和
 `--timeout` 控制等待行为；部分批量操作失败时，CLI 返回非零退出码。默认输出会递归隐藏
 密码、IP、访问 URL 和登录命令；只有显式指定 `--show-sensitive` 才会输出原值。
+`instance show` 可使用 `--ip`、`--softwares`、`--spec`、`--disks`、`--billing`、
+`--image` 和 `--status` 聚焦输出一个或多个信息分组；不传这些选项时保持完整摘要。
 
 Region 和 Zone 是资源参数，放在对应子命令后：
 
 ```bash
-compshare instance list --region cn-sh2
+compshare instance list --region cn-sh2 --zone cn-sh2-02
 compshare instance create --region cn-sh2 --zone cn-sh2-02
 compshare image list --source custom --region cn-sh2 --zone cn-sh2-02
 ```
@@ -205,6 +240,7 @@ compshare lang       # 查看当前语言
 ## 安全说明
 
 - 配置目录和文件分别使用 `0700`、`0600` 权限。
+- 本地实例模板文件同样使用 `0600` 权限，所在目录使用 `0700` 权限。
 - API 私钥不会出现在命令输出中。
 - 默认使用 `***` 隐藏密码、私钥、IP、访问 URL、令牌和登录命令，包括嵌套 JSON 字段。
 - `instance ssh` 在支持的交互式终端中通过伪终端自动填写登录密码，不会打印密码或将其放入进程参数。
@@ -215,8 +251,11 @@ compshare lang       # 查看当前语言
 - `instance ssh` 默认将 API 返回的 SSH 命令和密码按 profile/实例缓存 1 小时；Windows 使用当前用户的 DPAPI 加密密码，其他平台将缓存文件权限限制为当前用户。可用 `--refresh` 强制更新、`--no-cache` 禁用；重置密码和重装实例会清除对应缓存。
 - 实例创建是异步操作；`instance create` 默认等待到 `Running`，显式使用 `--no-wait` 才会在创建接口返回后立即退出。`instance ssh` 也会默认等待实例运行后再连接。
 - `instance scp INSTANCE_ID LOCAL_PATH REMOTE_PATH` 可自动认证并上传本地文件或目录。
+- `--json instance scp ...` 会真实执行上传，并返回 `ok`、`phase`、`exit_code`、
+  `stdout`、`stderr` 和 `error`；只有显式使用 `--print` 才仅输出命令。
 - `--show-sensitive` 会恢复这些字段的原始值；请勿在共享终端、CI 日志或 Agent 会话中使用。
-- 删除、关机、重启、重装和改配等操作默认要求确认。
+- 删除、关机、重启、重装和改配等操作默认要求输入 `y` 或 `n` 确认；空输入或无效输入
+  最多重试三次。JSON 模式不启动确认提示，执行这类操作必须显式使用 `--yes`。
 
 ## 开发校验
 

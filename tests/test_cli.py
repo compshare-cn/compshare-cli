@@ -8,6 +8,7 @@ from compshare_cli import __version__, cli
 from compshare_cli.commands import doctor as doctor_module
 from compshare_cli.commands import image as image_module
 from compshare_cli.commands import instance, team
+from compshare_cli.config import ConfigStore, Profile
 from compshare_cli.i18n import localize_command
 from compshare_cli.ssh import RemoteExecutionResult
 
@@ -17,6 +18,7 @@ runner = CliRunner()
 @pytest.fixture(autouse=True)
 def isolate_ssh_cache(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("COMPSHARE_SSH_CACHE_FILE", str(tmp_path / "ssh-cache.json"))
+    monkeypatch.setenv("COMPSHARE_TEMPLATE_FILE", str(tmp_path / "instance-templates.json"))
     monkeypatch.setenv("COMPSHARE_PUBLIC_KEY", "test-public")
     monkeypatch.setenv("COMPSHARE_PRIVATE_KEY", "test-private")
 
@@ -26,6 +28,7 @@ def isolate_ssh_cache(monkeypatch, tmp_path) -> None:
     [
         ["--help"],
         ["instance", "--help"],
+        ["instance", "template", "--help"],
         ["image", "--help"],
         ["storage", "--help"],
         ["storage", "disk", "--help"],
@@ -45,6 +48,12 @@ def test_global_json_is_accepted_before_command(capsys) -> None:
     assert json.loads(capsys.readouterr().out) == {"version": __version__}
 
 
+def test_version_flag(capsys) -> None:
+    cli.main(["--version"])
+
+    assert capsys.readouterr().out.strip() == __version__
+
+
 def test_global_profile_is_accepted_before_command(capsys) -> None:
     cli.main(["--profile", "testing", "--json", "version"])
     assert json.loads(capsys.readouterr().out) == {"version": __version__}
@@ -60,14 +69,27 @@ def test_no_args_shows_help_without_error(capsys) -> None:
 def test_root_help_lists_config_first(capsys) -> None:
     cli.main(["-h"])
     help_text = capsys.readouterr().out
-    assert help_text.index("config") < help_text.index("version")
+    assert "--version" in help_text
+    assert help_text.index("config") < help_text.index("lang")
 
 
 def test_global_options_after_command_are_rejected(capsys) -> None:
     with pytest.raises(SystemExit) as raised:
         cli.main(["version", "--json"])
     assert raised.value.code == 2
-    assert "No such option: --json" in json.loads(capsys.readouterr().out)["error"]
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert "No such option: --json" in error
+    assert "compshare --json instance list" in error
+
+
+def test_json_config_does_not_prompt_for_credentials(capsys) -> None:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--json", "config"])
+
+    assert raised.value.code == 2
+    output = capsys.readouterr().out
+    assert "公钥:" not in output
+    assert "--public-key" in json.loads(output)["error"]
 
 
 def test_config_error_is_json(monkeypatch, tmp_path, capsys) -> None:
@@ -124,6 +146,38 @@ def test_config_profile_commands(monkeypatch, tmp_path) -> None:
 
     deleted = runner.invoke(cli.app, ["config", "delete", "work", "--yes"])
     assert deleted.exit_code == 0, deleted.output
+
+
+def test_confirmation_retries_empty_and_invalid_answers(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(path))
+    ConfigStore().save_profile("work", Profile("pub", "private"))
+
+    result = runner.invoke(
+        cli.app,
+        ["config", "delete", "work"],
+        input="\ninvalid\ny\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout.count("[y/N]") == 3
+    assert result.stdout.count("请输入 y 或 n") == 2
+    assert "work" not in ConfigStore().list_profiles()
+
+
+def test_json_confirmation_requires_yes_without_prompt(monkeypatch, tmp_path, capsys) -> None:
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(path))
+    ConfigStore().save_profile("work", Profile("pub", "private"))
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--json", "config", "delete", "work"])
+
+    assert raised.value.code == 2
+    output = capsys.readouterr().out
+    assert "[y/N]" not in output
+    assert "--yes" in json.loads(output)["error"]
+    assert "work" in ConfigStore().list_profiles()
 
 
 def test_lang_command_persists_help_language(monkeypatch, tmp_path, capsys) -> None:
@@ -462,6 +516,129 @@ def test_create_json_requires_explicit_parameters(capsys) -> None:
     assert "--gpu" in payload["error"]
 
 
+def test_local_instance_template_crud() -> None:
+    created = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "instance",
+            "template",
+            "create",
+            "训练配置",
+            "--description",
+            "4090 training",
+            "--gpu",
+            "4090",
+            "--count",
+            "1",
+            "--cpu",
+            "16",
+            "--memory",
+            "64GiB",
+            "--image",
+            "image-1",
+            "--region",
+            "cn-sh2",
+            "--zone",
+            "cn-sh2-02",
+            "--disk",
+            "100GiB",
+            "--us3",
+        ],
+    )
+    assert created.exit_code == 0, created.output
+    assert json.loads(created.stdout)["parameters"]["gpu"] == "4090"
+
+    listed = runner.invoke(cli.app, ["--json", "instance", "template", "list"])
+    shown = runner.invoke(
+        cli.app,
+        ["--json", "instance", "template", "show", "训练配置"],
+    )
+    assert listed.exit_code == 0, listed.output
+    assert shown.exit_code == 0, shown.output
+    assert [item["name"] for item in json.loads(listed.stdout)["templates"]] == ["训练配置"]
+    assert json.loads(shown.stdout)["description"] == "4090 training"
+
+    deleted = runner.invoke(
+        cli.app,
+        ["--json", "instance", "template", "delete", "训练配置", "--yes"],
+    )
+    assert deleted.exit_code == 0, deleted.output
+    assert json.loads(deleted.stdout) == {"ok": True, "name": "训练配置"}
+
+
+def test_instance_create_loads_template_and_explicit_options_override(monkeypatch) -> None:
+    saved = runner.invoke(
+        cli.app,
+        [
+            "instance",
+            "template",
+            "create",
+            "training",
+            "--gpu",
+            "4090",
+            "--count",
+            "1",
+            "--cpu",
+            "12",
+            "--memory",
+            "32GiB",
+            "--image",
+            "image-1",
+            "--region",
+            "cn-wlcb",
+            "--zone",
+            "cn-wlcb-01",
+            "--disk",
+            "100GiB",
+            "--charge",
+            "Postpay",
+            "--max-count",
+            "2",
+            "--us3",
+        ],
+    )
+    assert saved.exit_code == 0, saved.output
+
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append((action, params))
+        if action == "CheckCompShareResourceCapacity":
+            return {"Specs": [{"Gpu": 1, "Cpu": 16, "Mem": 32, "ResourceEnough": True}]}
+        if action == "GetCompShareInstancePrice":
+            return {"PriceDetails": [{"ChargeType": "Postpay", "Instance": 0.7}]}
+        raise AssertionError(action)
+
+    monkeypatch.setattr(instance, "call", fake_call)
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "instance",
+            "create",
+            "--template",
+            "training",
+            "--cpu",
+            "16",
+            "--no-us3",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["template"] == "training"
+    assert payload["request"]["GpuType"] == "4090"
+    assert payload["request"]["CPU"] == 16
+    assert payload["request"]["MaxCount"] == 2
+    assert "EnableUS3" not in payload["request"]
+    assert [action for action, _ in calls] == [
+        "CheckCompShareResourceCapacity",
+        "GetCompShareInstancePrice",
+    ]
+
+
 def test_create_explicit_json_mode_skips_discovery(monkeypatch) -> None:
     calls = []
 
@@ -672,65 +849,27 @@ def test_schedule_auto_detects_project_id(monkeypatch) -> None:
     assert calls[1][1]["ProjectId"] == "org-default"
 
 
-def test_monitor_is_marked_as_coming_soon(monkeypatch) -> None:
-    calls = []
+def test_unavailable_instance_commands_are_not_exposed() -> None:
+    instance_help = runner.invoke(cli.app, ["instance", "--help"])
+    software_help = runner.invoke(cli.app, ["instance", "software", "--help"])
+    show_help = runner.invoke(cli.app, ["instance", "show", "--help"])
 
-    def fake_invoke(state, action, params, **kwargs):
-        calls.append((action, params))
-        return {"RetCode": 0}
-
-    monkeypatch.setenv("COMPSHARE_LANG", "zh")
-    monkeypatch.setattr(instance, "invoke", fake_invoke)
-    result = runner.invoke(
-        cli.app,
-        ["instance", "monitor", "cpod-1", "--region", "cn-bj2"],
-    )
-
-    assert result.exit_code == 1
-    assert str(result.exception) == "实例监控功能待上线。"
-    assert calls == []
-
-
-def test_software_url_includes_required_zone(monkeypatch) -> None:
-    calls = []
-
-    def fake_invoke(state, action, params, **kwargs):
-        calls.append((action, params))
-        return {"RetCode": 0, "URL": "https://example.invalid"}
-
-    monkeypatch.setattr(instance, "invoke", fake_invoke)
-    monkeypatch.setattr(
-        instance,
-        "locate_instance",
-        lambda state, value: (
-            "cn-bj2",
-            "cn-bj2-03",
-            {"UHostId": value, "Zone": "cn-bj2-03"},
-        ),
-    )
-    result = runner.invoke(
-        cli.app,
-        [
-            "instance",
-            "software",
-            "url",
-            "cpod-1",
-            "JupyterLab",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert calls == [
-        (
-            "GetSoftwareURL",
-            {
-                "Region": "cn-bj2",
-                "Zone": "cn-bj2-03",
-                "UHostId": "cpod-1",
-                "Software": "JupyterLab",
-            },
-        )
-    ]
+    assert instance_help.exit_code == 0, instance_help.output
+    assert software_help.exit_code == 0, software_help.output
+    assert show_help.exit_code == 0, show_help.output
+    assert "monitor" not in instance_help.stdout
+    assert "url" not in software_help.stdout
+    for option in (
+        "--ip",
+        "--softwares",
+        "--spec",
+        "--disks",
+        "--billing",
+        "--image",
+        "--status",
+    ):
+        assert option in show_help.stdout
+    assert "--connection" not in show_help.stdout
 
 
 def test_instance_show_json_redacts_private_fields_unless_enabled(monkeypatch) -> None:
@@ -766,6 +905,172 @@ def test_instance_show_json_redacts_private_fields_unless_enabled(monkeypatch) -
 
     assert private_result.exit_code == 0, private_result.output
     assert json.loads(private_result.stdout)["UHostSet"][0] == host
+
+    safe_human = runner.invoke(cli.app, ["instance", "show", "uhost-1"])
+    private_human = runner.invoke(
+        cli.app,
+        ["--show-sensitive", "instance", "show", "uhost-1"],
+    )
+    assert safe_human.exit_code == 0, safe_human.output
+    assert "JupyterLab" in safe_human.stdout
+    assert "https://example.invalid/token" not in safe_human.stdout
+    assert "***" in safe_human.stdout
+    assert private_human.exit_code == 0, private_human.output
+    assert "https://example.invalid/token" in private_human.stdout
+
+
+def test_instance_show_focus_flags_return_only_selected_groups(monkeypatch) -> None:
+    host = {
+        "UHostId": "uhost-1",
+        "Region": "cn-sh2",
+        "Zone": "cn-sh2-02",
+        "Name": "training",
+        "Password": "instance-secret",
+        "IPSet": [{"Type": "Bgp", "IP": "203.0.113.10"}],
+        "Softwares": [{"Name": "JupyterLab", "URL": "https://example.invalid/token"}],
+        "InstanceType": "Container",
+        "MachineType": "G2",
+        "GpuType": "4090",
+        "GPU": 1,
+        "GraphicsMemory": {"Value": 24, "Unit": "GB"},
+        "CPU": 8,
+        "Memory": 32768,
+        "CpuPlatform": "AMD/Zen4",
+        "CpuArch": "x86_64",
+        "SupportWithoutGpuStart": True,
+        "DiskSet": [{"DiskId": "disk-1", "Size": 100}],
+        "UDiskSet": [{"DiskId": "udisk-1", "Size": 50}],
+        "VolumeSet": [{"VolumeId": "volume-1", "Size": 200}],
+        "TotalDiskSpace": 150,
+        "TotalVolumeSpace": 200,
+        "ChargeType": "Postpay",
+        "InstancePrice": 1.25,
+        "CompShareImagePrice": 0.1,
+        "DiskPrice": 0.05,
+        "DiskPriceInfo": [{"Price": 0.05}],
+        "DiscountType": 1,
+        "AutoRenew": "No",
+        "IsExpire": "No",
+        "ExpireTime": 1800000000,
+        "PostPayPowerOffBillingResource": [{"Type": "Disk"}],
+        "CompShareImageId": "image-1",
+        "CompShareImageName": "PyTorch",
+        "CompShareImageType": "System",
+        "CompShareImageVersionName": "v1",
+        "CompShareImageStatus": "Available",
+        "CompShareImageAuthor": "Compshare",
+        "OsName": "Ubuntu 22.04",
+        "OsType": "Linux",
+        "BasicImageId": "base-1",
+        "BasicImageName": "Ubuntu",
+        "State": "Running",
+        "CreateTime": 1700000000,
+        "StartTime": 1700000100,
+        "StopTime": 0,
+        "UpdateTime": 1700000200,
+        "SchedulerStopTime": 1700000300,
+        "ReleaseTime": 0,
+    }
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: ("cn-sh2", "cn-sh2-02", host),
+    )
+    expected = {
+        "--ip": {"IPSet"},
+        "--softwares": {"Softwares"},
+        "--spec": {
+            "InstanceType",
+            "MachineType",
+            "GpuType",
+            "GPU",
+            "GraphicsMemory",
+            "CPU",
+            "Memory",
+            "CpuPlatform",
+            "CpuArch",
+            "SupportWithoutGpuStart",
+        },
+        "--disks": {"DiskSet", "UDiskSet", "VolumeSet", "TotalDiskSpace", "TotalVolumeSpace"},
+        "--billing": {
+            "ChargeType",
+            "InstancePrice",
+            "CompShareImagePrice",
+            "DiskPrice",
+            "DiskPriceInfo",
+            "DiscountType",
+            "AutoRenew",
+            "IsExpire",
+            "ExpireTime",
+            "PostPayPowerOffBillingResource",
+        },
+        "--image": {
+            "CompShareImageId",
+            "CompShareImageName",
+            "CompShareImageType",
+            "CompShareImageVersionName",
+            "CompShareImageStatus",
+            "CompShareImageAuthor",
+            "OsName",
+            "OsType",
+            "BasicImageId",
+            "BasicImageName",
+        },
+        "--status": {
+            "State",
+            "CreateTime",
+            "StartTime",
+            "StopTime",
+            "UpdateTime",
+            "SchedulerStopTime",
+            "ReleaseTime",
+        },
+    }
+
+    for option, keys in expected.items():
+        result = runner.invoke(cli.app, ["--json", "instance", "show", "uhost-1", option])
+        assert result.exit_code == 0, result.output
+        assert set(json.loads(result.stdout)["UHostSet"][0]) == keys
+
+    combined = runner.invoke(
+        cli.app,
+        ["--json", "--show-sensitive", "instance", "show", "uhost-1", "--ip", "--softwares"],
+    )
+    assert combined.exit_code == 0, combined.output
+    assert json.loads(combined.stdout) == {
+        "UHostSet": [
+            {
+                "IPSet": [{"Type": "Bgp", "IP": "203.0.113.10"}],
+                "Softwares": [{"Name": "JupyterLab", "URL": "https://example.invalid/token"}],
+            }
+        ]
+    }
+
+
+def test_instance_show_focused_human_output_still_redacts_sensitive_values(monkeypatch) -> None:
+    host = {
+        "IPSet": [{"Type": "Bgp", "IP": "203.0.113.10"}],
+        "Softwares": [{"Name": "JupyterLab", "URL": "https://example.invalid/token"}],
+    }
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: ("cn-sh2", "cn-sh2-02", host),
+    )
+
+    safe = runner.invoke(cli.app, ["instance", "show", "uhost-1", "--ip", "--softwares"])
+    private = runner.invoke(
+        cli.app,
+        ["--show-sensitive", "instance", "show", "uhost-1", "--ip", "--softwares"],
+    )
+
+    assert safe.exit_code == 0, safe.output
+    assert "JupyterLab" in safe.stdout
+    assert "203.0.113.10" not in safe.stdout
+    assert "https://example.invalid/token" not in safe.stdout
+    assert private.exit_code == 0, private.output
+    assert "203.0.113.10" in private.stdout
+    assert "https://example.invalid/token" in private.stdout
 
 
 def test_ssh_print_redacts_sensitive_values_by_default(monkeypatch) -> None:
@@ -1292,6 +1597,105 @@ def test_scp_print_redacts_command_by_default(monkeypatch, tmp_path) -> None:
     assert str(source) not in result.stdout
 
 
+def test_json_scp_executes_and_returns_structured_result(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "model.bin"
+    source.write_bytes(b"model")
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-wlcb",
+            "cn-wlcb-01",
+            {
+                "UHostId": value,
+                "Zone": "cn-wlcb-01",
+                "SshLoginCommand": "ssh root@example.invalid",
+                "Password": "instance-secret",
+            },
+        ),
+    )
+    copies = []
+    monkeypatch.setattr(
+        instance,
+        "copy_captured_with_password",
+        lambda argv, password: (
+            copies.append((argv, password))
+            or RemoteExecutionResult(0, "uploaded\n", "", "completed")
+        ),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "scp", "uhost-1", str(source), "/workspace/model.bin"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert copies == [
+        (
+            [
+                "scp",
+                str(source.resolve()),
+                "root@example.invalid:/workspace/model.bin",
+            ],
+            "instance-secret",
+        )
+    ]
+    assert json.loads(result.stdout) == {
+        "instance": "uhost-1",
+        "ok": True,
+        "phase": "completed",
+        "exit_code": 0,
+        "stdout": "uploaded\n",
+        "stderr": "",
+        "error": None,
+    }
+
+
+def test_json_scp_propagates_copy_failure(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "model.bin"
+    source.write_bytes(b"model")
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-wlcb",
+            "cn-wlcb-01",
+            {
+                "UHostId": value,
+                "Zone": "cn-wlcb-01",
+                "SshLoginCommand": "ssh root@example.invalid",
+                "Password": "instance-secret",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        instance,
+        "copy_captured_with_password",
+        lambda argv, password: RemoteExecutionResult(
+            255,
+            "",
+            "Permission denied",
+            "authentication",
+            "authentication_failed",
+        ),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "scp", "uhost-1", str(source), "/workspace/model.bin"],
+    )
+
+    assert result.exit_code == 255
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["exit_code"] == 255
+    assert payload["error"] == {
+        "phase": "authentication",
+        "code": "authentication_failed",
+        "message": "Permission denied",
+    }
+
+
 def test_instance_list_applies_global_pagination_after_filters(monkeypatch) -> None:
     responses = [
         {"UHostId": "a-1", "State": "Running", "Region": "cn-a"},
@@ -1319,6 +1723,45 @@ def test_instance_list_applies_global_pagination_after_filters(monkeypatch) -> N
     assert payload["FilteredCount"] == 4
     assert payload["ReturnedCount"] == 2
     assert [item["UHostId"] for item in payload["UHostSet"]] == ["a-3", "b-1"]
+
+
+def test_instance_list_requires_region_and_zone_together(capsys) -> None:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--json", "instance", "list", "--region", "cn-sh2"])
+
+    assert raised.value.code == 2
+    assert "--region" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_instance_list_passes_explicit_region_and_zone(monkeypatch) -> None:
+    calls = []
+
+    def fake_pages(state, action, params, list_key, **kwargs):
+        calls.append((action, params, list_key))
+        return {"UHostSet": []}
+
+    monkeypatch.setattr(instance, "collect_pages", fake_pages)
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "instance",
+            "list",
+            "--region",
+            "cn-sh2",
+            "--zone",
+            "cn-sh2-02",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        (
+            "DescribeCompShareInstance",
+            {"Region": "cn-sh2", "Zone": "cn-sh2-02"},
+            "UHostSet",
+        )
+    ]
 
 
 def test_instance_list_all_ignores_display_limit(monkeypatch) -> None:

@@ -245,6 +245,31 @@ def copy_with_password(argv: List[str], password: str) -> int:
     return _run_with_askpass(command, password)
 
 
+def copy_captured_with_password(argv: List[str], password: str) -> RemoteExecutionResult:
+    """Run and capture an SCP upload without exposing its password."""
+    command = _scp_password_authentication(argv)
+    completed = _run_with_askpass(command, password, capture=True)
+    assert isinstance(completed, subprocess.CompletedProcess)
+    return remote_execution_result(completed.returncode, completed.stdout, completed.stderr)
+
+
+def copy_captured(argv: List[str]) -> RemoteExecutionResult:
+    """Run and capture an SCP upload using non-interactive OpenSSH authentication."""
+    executable = os.path.basename(argv[0]).casefold()
+    if executable not in {"scp", "scp.exe"}:
+        raise PasswordAutomationUnavailable
+    command = [
+        argv[0],
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        *argv[1:],
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    return remote_execution_result(completed.returncode, completed.stdout, completed.stderr)
+
+
 def _run_with_askpass(
     command: List[str],
     password: str,

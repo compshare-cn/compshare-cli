@@ -26,7 +26,9 @@ def test_every_available_public_action_is_wired_into_a_command() -> None:
     command_dir = Path(__file__).parents[1] / "src" / "compshare_cli" / "commands"
     source = "\n".join(path.read_text(encoding="utf-8") for path in command_dir.glob("*.py"))
     missing = {
-        action for action in PUBLIC_ACTIONS - COMING_SOON_ACTIONS if f'"{action}"' not in source
+        action
+        for action in PUBLIC_ACTIONS - COMING_SOON_ACTIONS - UNAVAILABLE_ACTIONS
+        if f'"{action}"' not in source
     }
     assert missing == set()
 
@@ -53,5 +55,5 @@ def test_action_registry_matches_local_public_docs(directory: str, expected: fro
         match = re.search(r"^#\s+([A-Za-z][A-Za-z0-9]+)\s+", path.read_text(encoding="utf-8"), re.M)
         if match and match.group(1) != "US3CLI":
             documented.add(match.group(1))
-    unavailable = UNAVAILABLE_ACTIONS if directory == "image" else set()
+    unavailable = UNAVAILABLE_ACTIONS - PUBLIC_ACTIONS if directory == "image" else set()
     assert documented == set(expected) | set(unavailable)

@@ -137,9 +137,7 @@ def test_locate_disk_supports_detached_disk(monkeypatch) -> None:
     def fake_call(state, action, params):
         if action == "DescribeCompshareDisk":
             return {
-                "DiskSet": [
-                    {"ResourceId": "udisk-1", "Zone": "cn-sh2-02", "MountInstance": ""}
-                ]
+                "DiskSet": [{"ResourceId": "udisk-1", "Zone": "cn-sh2-02", "MountInstance": ""}]
             }
         return {"ZoneInfo": [{"Region": "cn-sh2", "Zone": "cn-sh2-02"}]}
 

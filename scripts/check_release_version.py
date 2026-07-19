@@ -30,7 +30,6 @@ def _assert_versions(expected: str, versions: Iterable[tuple[str, str]]) -> None
 
 def check_source(root: Path) -> str:
     init_text = (root / "src/compshare_cli/__init__.py").read_text(encoding="utf-8")
-    readme_text = (root / "README.md").read_text(encoding="utf-8")
     changelog_text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     pyproject_text = (root / "pyproject.toml").read_text(encoding="utf-8")
 
@@ -39,11 +38,6 @@ def check_source(root: Path) -> str:
         init_text,
         "compshare_cli.__version__",
         flags=re.MULTILINE,
-    )
-    readme_version = _extract(
-        rf"当前版本：`({VERSION})`",
-        readme_text,
-        "README.md",
     )
     changelog_version = _extract(
         rf"^##\s+({VERSION})\s*$",
@@ -63,10 +57,7 @@ def check_source(root: Path) -> str:
         raise VersionConsistencyError(
             "pyproject.toml must derive package metadata from compshare_cli.__version__."
         )
-    _assert_versions(
-        runtime_version,
-        (("README.md", readme_version), ("CHANGELOG.md", changelog_version)),
-    )
+    _assert_versions(runtime_version, (("CHANGELOG.md", changelog_version),))
     return runtime_version
 
 
@@ -86,10 +77,6 @@ def _member(names: Iterable[str], suffix: str, artifact: Path) -> str:
 
 def _metadata_version(text: str, label: str) -> str:
     return _extract(rf"^Version:\s*({VERSION})\s*$", text, label, flags=re.MULTILINE)
-
-
-def _readme_version(text: str, label: str) -> str:
-    return _extract(rf"当前版本：`({VERSION})`", text, label)
 
 
 def _runtime_version(text: str, label: str) -> str:
@@ -113,7 +100,6 @@ def _check_wheel(path: Path, expected: str) -> None:
         (
             (f"{path.name}:metadata", _metadata_version(metadata_text, path.name)),
             (f"{path.name}:__version__", _runtime_version(init_text, path.name)),
-            (f"{path.name}:README", _readme_version(metadata_text, path.name)),
         ),
     )
 
@@ -123,21 +109,17 @@ def _check_sdist(path: Path, expected: str) -> None:
         names = archive.getnames()
         metadata_name = _member(names, "/PKG-INFO", path)
         init_name = _member(names, "/src/compshare_cli/__init__.py", path)
-        readme_name = _member(names, "/README.md", path)
         metadata = archive.extractfile(metadata_name)
         init = archive.extractfile(init_name)
-        readme = archive.extractfile(readme_name)
-        if metadata is None or init is None or readme is None:
+        if metadata is None or init is None:
             raise VersionConsistencyError(f"Unable to read required files from {path.name}.")
         metadata_text = metadata.read().decode("utf-8")
         init_text = init.read().decode("utf-8")
-        readme_text = readme.read().decode("utf-8")
     _assert_versions(
         expected,
         (
             (f"{path.name}:metadata", _metadata_version(metadata_text, path.name)),
             (f"{path.name}:__version__", _runtime_version(init_text, path.name)),
-            (f"{path.name}:README", _readme_version(readme_text, path.name)),
         ),
     )
 

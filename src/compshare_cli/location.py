@@ -77,11 +77,7 @@ def locate_disk(
     zone = str(disk.get("Zone") or "")
     locations = supported_locations(state, request_region=request_region)
     location = next(
-        (
-            item
-            for item in locations
-            if str(item.get("Zone") or "") == zone and item.get("Region")
-        ),
+        (item for item in locations if str(item.get("Zone") or "") == zone and item.get("Region")),
         None,
     )
     if location is None:
@@ -95,8 +91,6 @@ def locate_disk(
     region = str(location["Region"])
     mount_instance = disk.get("MountInstance")
     host = (
-        {"UHostId": str(mount_instance), "Region": region, "Zone": zone}
-        if mount_instance
-        else None
+        {"UHostId": str(mount_instance), "Region": region, "Zone": zone} if mount_instance else None
     )
     return region, zone, host, disk

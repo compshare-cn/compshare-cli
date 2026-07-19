@@ -16,7 +16,7 @@ PyPI Trusted Publishing 自动上传。仓库不需要保存 PyPI Token。
 
 ## 发布新版本
 
-1. 更新 `pyproject.toml` 中的版本和 `CHANGELOG.md`。
+1. 更新 `src/compshare_cli/__init__.py` 中的版本和 `CHANGELOG.md`。
 2. 运行 `ruff check .`、`ruff format --check .` 和 `pytest`。
 3. 创建与包版本一致的标签，例如 `v0.2.2`。
 4. 发布对应的 GitHub Release。

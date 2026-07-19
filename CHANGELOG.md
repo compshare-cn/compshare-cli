@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.5
+
+- 精简 README 的安装和快速开始内容，新增 CompShare SDK 多语言示例入口。
+- 新增可通过 `npx skills` 安装的 CompShare CLI Agent Skill，覆盖实例、镜像、存储、团队、
+  SSH、文件传输和远程任务等主要工作流。
+- 发布版本校验不再依赖 README 中的硬编码版本号，并修正发布文档中的版本更新位置。
+
 ## 0.3.4
 
 - 统一 JSON 顶层契约为 `ok/schema_version/data/meta/error`：错误提供稳定代码，列表使用精简的

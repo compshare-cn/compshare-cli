@@ -54,16 +54,6 @@ compshare -h
 compshare instance -h
 ```
 
-## AI Agent Skill
-
-为 Codex、Claude Code、Cursor 等 AI Agent 安装 CompShare CLI Skill：
-
-```bash
-npx skills add compshare-cn/compshare-cli --skill compshare-cli
-```
-
-完整说明见 [CompShare CLI Skill](skills/compshare-cli/SKILL.md)。
-
 ## 命令概览
 
 ```text
@@ -76,3 +66,19 @@ compshare image      平台、自定义、社区及共享镜像
 compshare storage    云盘和 US3 挂载
 compshare team       团队、邀请、成员额度、账单和审计
 ```
+
+## Skill
+
+为 Codex、Claude Code、Cursor 等 AI Agent 安装 CompShare CLI Skill：
+
+```bash
+npx skills add compshare-cn/compshare-cli --skill compshare-cli
+```
+
+完整说明见 [CompShare CLI Skill](skills/compshare-cli/SKILL.md)。
+
+## SDK
+
+如需通过 SDK 集成 CompShare API，可参考独立的
+[CompShare Developer Examples](https://github.com/ucloud/compshare-developer-examples) 仓库。
+其中包含 Python、Go、Java、JavaScript 和 PHP 示例，覆盖 API 鉴权、GPU 实例创建、规格配置和状态查询。

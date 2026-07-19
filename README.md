@@ -54,6 +54,16 @@ compshare -h
 compshare instance -h
 ```
 
+## AI Agent Skill
+
+为 Codex、Claude Code、Cursor 等 AI Agent 安装 CompShare CLI Skill：
+
+```bash
+npx skills add compshare-cn/compshare-cli --skill compshare-cli
+```
+
+完整说明见 [CompShare CLI Skill](skills/compshare-cli/SKILL.md)。
+
 ## 命令概览
 
 ```text

@@ -250,6 +250,8 @@ def list_images(
         response,
         rows=rows,
         columns=IMAGE_COLUMNS,
+        json_list=True,
+        metadata={"source": source, "all": all_results},
     )
 
 
@@ -293,7 +295,13 @@ def show(
             ("PRICE/H", item.get("Price")),
             ("DESCRIPTION", item.get("Description")),
         ],
-        response=response,
+        response={
+            "Action": response.get("Action"),
+            "RetCode": response.get("RetCode"),
+            "request_uuid": response.get("request_uuid"),
+            "source": source,
+            "image": item,
+        },
     )
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from datetime import datetime
-from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from rich.console import Console
 from rich.panel import Panel
@@ -37,6 +37,9 @@ SENSITIVE_KEYS = {
     "url",
 }
 
+JSON_SCHEMA_VERSION = "1"
+_TRANSPORT_KEYS = {"Action", "RetCode", "request_uuid"}
+
 
 def _normalized_key(key: Any) -> str:
     return "".join(character for character in str(key).casefold() if character.isalnum())
@@ -63,6 +66,86 @@ def sanitized(value: Any, *, show_sensitive: bool = False) -> Any:
     if isinstance(value, list):
         return [sanitized(item) for item in value]
     return value
+
+
+def _sanitized_with_paths(
+    value: Any,
+    *,
+    show_sensitive: bool,
+    path: str,
+) -> Tuple[Any, List[str]]:
+    if show_sensitive:
+        return value, []
+    if isinstance(value, dict):
+        result: Dict[Any, Any] = {}
+        redacted: List[str] = []
+        for key, item in value.items():
+            item_path = f"{path}.{key}"
+            if _is_sensitive_key(key):
+                result[key] = "***"
+                redacted.append(item_path)
+            else:
+                result[key], item_redacted = _sanitized_with_paths(
+                    item,
+                    show_sensitive=False,
+                    path=item_path,
+                )
+                redacted.extend(item_redacted)
+        return result, redacted
+    if isinstance(value, list):
+        result = []
+        redacted = []
+        for index, item in enumerate(value):
+            safe_item, item_redacted = _sanitized_with_paths(
+                item,
+                show_sensitive=False,
+                path=f"{path}[{index}]",
+            )
+            result.append(safe_item)
+            redacted.extend(item_redacted)
+        return result, redacted
+    return value, []
+
+
+def _response_data(response: Mapping[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    data = {key: value for key, value in response.items() if key not in _TRANSPORT_KEYS}
+    metadata: Dict[str, Any] = {}
+    if response.get("Action") is not None:
+        metadata["action"] = response["Action"]
+    if response.get("RetCode") is not None:
+        metadata["ret_code"] = response["RetCode"]
+    if response.get("request_uuid") is not None:
+        metadata["request_uuid"] = response["request_uuid"]
+    return data, metadata
+
+
+def _pagination_metadata(response: Mapping[str, Any]) -> Dict[str, Any]:
+    mapping = {
+        "TotalCount": "total",
+        "FilteredCount": "filtered",
+        "ReturnedCount": "returned",
+        "Offset": "offset",
+    }
+    metadata = {
+        target: response[source]
+        for source, target in mapping.items()
+        if response.get(source) is not None
+    }
+    if "Limit" in response:
+        if response["Limit"] is None:
+            metadata["all"] = True
+        else:
+            metadata["limit"] = response["Limit"]
+    if response.get("RegionSet") is not None:
+        metadata["regions"] = response["RegionSet"]
+    return metadata
+
+
+def _project_rows(
+    rows: Iterable[Dict[str, Any]],
+    fields: Sequence[str],
+) -> List[Dict[str, Any]]:
+    return [{field: row.get(field) for field in fields} for row in rows]
 
 
 def _write_json(payload: Dict[str, Any]) -> None:
@@ -93,11 +176,29 @@ class Renderer:
         *,
         rows: Optional[Iterable[Dict[str, Any]]] = None,
         columns: Optional[Sequence[Tuple[str, str]]] = None,
+        json_list: bool = False,
+        json_fields: Optional[Sequence[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        safe = sanitized(response, show_sensitive=self.show_sensitive)
         if self.json_output:
-            _write_json(safe)
+            if response.get("ok") is False:
+                self._response_error(response)
+                return
+            data, response_metadata = _response_data(response)
+            data.pop("ok", None)
+            if data.get("error") is None:
+                data.pop("error", None)
+            if json_list:
+                fields = tuple(json_fields or (key for key, _ in columns or ()))
+                items = _project_rows(rows or (), fields)
+                data = {"items": items}
+                response_metadata.update(_pagination_metadata(response))
+                response_metadata.setdefault("returned", len(items))
+            if metadata:
+                response_metadata.update(metadata)
+            self._write_success(data, response_metadata)
             return
+        safe = sanitized(response, show_sensitive=self.show_sensitive)
         if rows is not None and columns:
             self.table(rows, columns)
             return
@@ -152,15 +253,86 @@ class Renderer:
 
     def error(self, message: str, *, details: Optional[Dict[str, Any]] = None) -> None:
         if self.json_output:
-            payload: Dict[str, Any] = {"ok": False, "error": message}
-            if details:
-                payload["details"] = sanitized(
-                    details,
-                    show_sensitive=self.show_sensitive,
-                )
-            _write_json(payload)
+            self._write_error("command_error", message, details)
         else:
             Console(stderr=True).print(f"[red]{tr('Error')}:[/red] {message}")
+
+    def coded_error(
+        self,
+        code: str,
+        message: str,
+        *,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if self.json_output:
+            self._write_error(code, message, details)
+        else:
+            Console(stderr=True).print(f"[red]{tr('Error')}:[/red] {message}")
+
+    def _write_success(self, data: Any, metadata: Optional[Dict[str, Any]] = None) -> None:
+        safe_data, redacted = _sanitized_with_paths(
+            data,
+            show_sensitive=self.show_sensitive,
+            path="data",
+        )
+        payload: Dict[str, Any] = {
+            "ok": True,
+            "schema_version": JSON_SCHEMA_VERSION,
+            "data": safe_data,
+        }
+        safe_metadata, metadata_redacted = _sanitized_with_paths(
+            dict(metadata or {}),
+            show_sensitive=self.show_sensitive,
+            path="meta",
+        )
+        redacted.extend(metadata_redacted)
+        if redacted:
+            safe_metadata["redacted_fields"] = redacted
+        if safe_metadata:
+            payload["meta"] = safe_metadata
+        _write_json(payload)
+
+    def _write_error(
+        self,
+        code: str,
+        message: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        error: Dict[str, Any] = {"code": code, "message": message}
+        redacted: List[str] = []
+        if details:
+            safe_details, redacted = _sanitized_with_paths(
+                details,
+                show_sensitive=self.show_sensitive,
+                path="error.details",
+            )
+            error["details"] = safe_details
+        payload: Dict[str, Any] = {
+            "ok": False,
+            "schema_version": JSON_SCHEMA_VERSION,
+            "error": error,
+        }
+        if redacted:
+            payload["meta"] = {"redacted_fields": redacted}
+        _write_json(payload)
+
+    def _response_error(self, response: Dict[str, Any]) -> None:
+        raw_error = response.get("error")
+        details = {
+            key: value
+            for key, value in response.items()
+            if key not in {"ok", "error", "error_code", "message"}
+        }
+        if isinstance(raw_error, dict):
+            code = str(raw_error.get("code") or "operation_failed")
+            message = str(raw_error.get("message") or "Operation failed.")
+            for key, value in raw_error.items():
+                if key not in {"code", "message"}:
+                    details.setdefault(key, value)
+        else:
+            code = str(response.get("error_code") or "operation_failed")
+            message = str(raw_error or response.get("message") or "Operation failed.")
+        self._write_error(code, message, details or None)
 
     def _cell(self, value: Any, *, key: Optional[str] = None) -> str:
         if value is None:

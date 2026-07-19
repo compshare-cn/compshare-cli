@@ -59,7 +59,11 @@ def test_ask_posts_only_the_question_and_preserves_json_response(monkeypatch) ->
     )
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == _answer()
+    assert json.loads(result.stdout) == {
+        "ok": True,
+        "schema_version": "1",
+        "data": _answer(),
+    }
     assert captured == {
         "url": "http://117.50.180.139:55089/v1/answer",
         "method": "POST",
@@ -98,7 +102,8 @@ def test_ask_empty_question_is_a_json_cli_error(monkeypatch, capsys) -> None:
     assert raised.value.code == 2
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
-    assert "问题不能为空" in payload["error"]
+    assert payload["error"]["code"] == "cli_error"
+    assert "问题不能为空" in payload["error"]["message"]
 
 
 def test_ask_reports_http_and_invalid_response_errors(monkeypatch) -> None:

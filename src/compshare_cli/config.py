@@ -12,6 +12,10 @@ from compshare_cli.errors import ConfigError
 
 DEFAULT_PROFILE = "default"
 DEFAULT_BASE_URL = "https://api.compshare.cn"
+CREDENTIAL_ENVIRONMENT = {
+    "public_key": "COMPSHARE_PUBLIC_KEY",
+    "private_key": "COMPSHARE_PRIVATE_KEY",
+}
 
 
 def config_path() -> Path:
@@ -79,6 +83,44 @@ class ConfigStore:
 
     def current_profile(self) -> str:
         return str(self._read().get("current_profile", DEFAULT_PROFILE))
+
+    def credential_status(self, name: Optional[str] = None) -> Dict[str, Any]:
+        """Describe the selected credential sources without exposing credential values."""
+        data = self._read()
+        selected = str(
+            name
+            or os.environ.get("COMPSHARE_PROFILE")
+            or data.get("current_profile", DEFAULT_PROFILE)
+        )
+        profiles = data.get("profiles", {})
+        raw = profiles.get(selected, {})
+        sources = {
+            f"{field}_source": (
+                "environment"
+                if os.environ.get(environment)
+                else "profile"
+                if raw.get(field)
+                else "missing"
+            )
+            for field, environment in CREDENTIAL_ENVIRONMENT.items()
+        }
+        unique_sources = set(sources.values())
+        if unique_sources == {"environment"}:
+            source = "environment"
+        elif unique_sources == {"profile"}:
+            source = "profile"
+        elif unique_sources == {"missing"}:
+            source = "unconfigured"
+        elif "missing" in unique_sources:
+            source = "incomplete"
+        else:
+            source = "mixed"
+        return {
+            "credential_source": source,
+            "selected_profile": selected,
+            "profile_exists": selected in profiles,
+            "credential_sources": sources,
+        }
 
     def use_profile(self, name: str) -> None:
         self._validate_profile_name(name)
@@ -150,8 +192,10 @@ class ConfigStore:
         )
         raw = data.get("profiles", {}).get(selected, {})
 
-        public_key = os.environ.get("COMPSHARE_PUBLIC_KEY") or raw.get("public_key")
-        private_key = os.environ.get("COMPSHARE_PRIVATE_KEY") or raw.get("private_key")
+        public_key = os.environ.get(CREDENTIAL_ENVIRONMENT["public_key"]) or raw.get("public_key")
+        private_key = os.environ.get(CREDENTIAL_ENVIRONMENT["private_key"]) or raw.get(
+            "private_key"
+        )
         if not public_key or not private_key:
             raise ConfigError(
                 "尚未配置 API 密钥。请运行 `compshare config --name NAME`，或设置 "

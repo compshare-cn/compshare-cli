@@ -42,7 +42,11 @@ def test_feedback_posts_category_and_message(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == {"ok": True, "id": 7}
+    assert json.loads(result.stdout) == {
+        "ok": True,
+        "schema_version": "1",
+        "data": {"id": 7},
+    }
     assert captured["url"] == "https://insights.example.test/v1/feedback"
     assert captured["timeout"] == 5.0
     assert captured["payload"]["category"] == "bug"

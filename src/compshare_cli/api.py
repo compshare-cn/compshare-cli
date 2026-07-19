@@ -52,11 +52,12 @@ def invoke(
                     continue
                 raise
     except CLIError as error:
-        renderer.error(str(error))
+        renderer.coded_error("configuration_error", str(error))
         raise typer.Exit(1) from error
     except ucloud_exc.RetCodeException as error:
         hint = error_hint(error.action or action, error.code)
-        renderer.error(
+        renderer.coded_error(
+            "api_error",
             _with_hint(error.message or str(error), hint),
             details={
                 "action": error.action,
@@ -67,10 +68,10 @@ def invoke(
         )
         raise typer.Exit(1) from error
     except ucloud_exc.UCloudException as error:
-        renderer.error(str(error))
+        renderer.coded_error("transport_error", str(error))
         raise typer.Exit(1) from error
     except Exception as error:  # SDK transport exceptions are not all UCloudException subclasses.
-        renderer.error(str(error))
+        renderer.coded_error("transport_error", str(error))
         raise typer.Exit(1) from error
 
     if success:
@@ -79,7 +80,7 @@ def invoke(
         renderer.data(response)
     else:
         rows = row_builder(response) if row_builder else response.get(list_key or "") or []
-        renderer.data(response, rows=rows, columns=columns)
+        renderer.data(response, rows=rows, columns=columns, json_list=True)
     return response
 
 
@@ -88,11 +89,14 @@ def call(runtime: Runtime, action: str, params: Dict[str, Any]) -> Dict[str, Any
     try:
         return _sdk(runtime, params).invoke(action, params)
     except CLIError as error:
-        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).coded_error(
+            "configuration_error", str(error)
+        )
         raise typer.Exit(1) from error
     except ucloud_exc.RetCodeException as error:
         hint = error_hint(error.action or action, error.code)
-        Renderer(runtime.json_output, runtime.show_sensitive).error(
+        Renderer(runtime.json_output, runtime.show_sensitive).coded_error(
+            "api_error",
             _with_hint(error.message or str(error), hint),
             details={
                 "action": error.action,
@@ -103,10 +107,14 @@ def call(runtime: Runtime, action: str, params: Dict[str, Any]) -> Dict[str, Any
         )
         raise typer.Exit(1) from error
     except ucloud_exc.UCloudException as error:
-        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).coded_error(
+            "transport_error", str(error)
+        )
         raise typer.Exit(1) from error
     except Exception as error:
-        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).coded_error(
+            "transport_error", str(error)
+        )
         raise typer.Exit(1) from error
 
 
@@ -195,11 +203,14 @@ def download_file(
     try:
         return _sdk(runtime, params).download(action, params)
     except CLIError as error:
-        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).coded_error(
+            "configuration_error", str(error)
+        )
         raise typer.Exit(1) from error
     except ucloud_exc.RetCodeException as error:
         hint = error_hint(error.action or action, error.code)
-        Renderer(runtime.json_output, runtime.show_sensitive).error(
+        Renderer(runtime.json_output, runtime.show_sensitive).coded_error(
+            "api_error",
             _with_hint(error.message or str(error), hint),
             details={
                 "action": error.action or action,
@@ -210,10 +221,14 @@ def download_file(
         )
         raise typer.Exit(1) from error
     except ucloud_exc.UCloudException as error:
-        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).coded_error(
+            "transport_error", str(error)
+        )
         raise typer.Exit(1) from error
     except Exception as error:
-        Renderer(runtime.json_output, runtime.show_sensitive).error(str(error))
+        Renderer(runtime.json_output, runtime.show_sensitive).coded_error(
+            "transport_error", str(error)
+        )
         raise typer.Exit(1) from error
 
 

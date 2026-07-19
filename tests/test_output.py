@@ -30,7 +30,12 @@ def test_json_renderer_emits_one_compact_document(capsys) -> None:
     Renderer(True).data({"RetCode": 0, "value": "中文"})
     output = capsys.readouterr().out
     assert output.count("\n") == 1
-    assert json.loads(output) == {"RetCode": 0, "value": "中文"}
+    assert json.loads(output) == {
+        "ok": True,
+        "schema_version": "1",
+        "data": {"value": "中文"},
+        "meta": {"ret_code": 0},
+    }
 
 
 def test_json_renderer_writes_utf8_bytes_under_a_gbk_stdout(monkeypatch) -> None:
@@ -41,7 +46,50 @@ def test_json_renderer_writes_utf8_bytes_under_a_gbk_stdout(monkeypatch) -> None
     Renderer(True).data({"ok": False, "error": "尚未配置 API 密钥。"})
 
     document = raw.getvalue().decode("utf-8")
-    assert json.loads(document) == {"ok": False, "error": "尚未配置 API 密钥。"}
+    assert json.loads(document) == {
+        "ok": False,
+        "schema_version": "1",
+        "error": {"code": "operation_failed", "message": "尚未配置 API 密钥。"},
+    }
+
+
+def test_json_renderer_reports_redacted_field_paths(capsys) -> None:
+    Renderer(True).data({"Password": "secret", "IPSet": [{"IP": "203.0.113.1"}]})
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["data"] == {"Password": "***", "IPSet": [{"IP": "***"}]}
+    assert payload["meta"]["redacted_fields"] == [
+        "data.Password",
+        "data.IPSet[0].IP",
+    ]
+
+
+def test_json_list_renderer_projects_rows_and_moves_pagination_to_metadata(capsys) -> None:
+    Renderer(True).data(
+        {
+            "Action": "DescribeThingsResponse",
+            "RetCode": 0,
+            "ThingSet": [{"Id": "one", "Readme": "large"}],
+            "TotalCount": 1,
+            "ReturnedCount": 1,
+            "Offset": 0,
+            "Limit": None,
+        },
+        rows=[{"Id": "one", "Readme": "large"}],
+        columns=(("Id", "ID"),),
+        json_list=True,
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["data"] == {"items": [{"Id": "one"}]}
+    assert payload["meta"] == {
+        "action": "DescribeThingsResponse",
+        "ret_code": 0,
+        "total": 1,
+        "returned": 1,
+        "offset": 0,
+        "all": True,
+    }
 
 
 def test_table_accepts_no_rows(capsys) -> None:

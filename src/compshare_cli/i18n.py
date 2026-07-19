@@ -28,15 +28,47 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     ),
     "Language: zh or en.": "语言：zh 或 en。",
     "Install completion for the current shell.": "为当前 Shell 安装命令补全。",
-    "Show completion for the current shell, to copy it or customize the installation.": (
-        "显示当前 Shell 的命令补全脚本，便于复制或自定义安装。"
-    ),
     "Save a CompShare API credential profile.": "保存优云智算 API 凭证配置。",
     "Print the CLI version.": "显示 CLI 版本。",
     "Print the CLI version and exit.": "显示 CLI 版本并退出。",
     "Ask a CompShare product question.": "询问优云智算产品问题。",
     "Question to answer.": "需要回答的问题。",
     "Manage GPU instances.": "管理 GPU 实例。",
+    "Manage durable remote instance jobs.": "管理可断线恢复的实例远程任务。",
+    "Submit a durable remote job and return immediately.": "提交持久化远程任务并立即返回。",
+    "List durable remote jobs on an instance.": "列出实例上的持久化远程任务。",
+    "Show durable remote job status and metadata.": "显示远程任务状态和元数据。",
+    "Read or follow durable remote job logs.": "读取或持续跟踪远程任务日志。",
+    "Wait for a durable remote job without cancelling on timeout.": (
+        "等待远程任务；等待超时不会取消任务。"
+    ),
+    "Cancel a running durable remote job.": "取消正在运行的远程任务。",
+    "Remove old terminal remote job records and logs.": "清理已结束远程任务的记录和日志。",
+    "Human-readable job name.": "便于识别的任务名称。",
+    "Remote working directory.": "远程工作目录。",
+    "Client-generated idempotency key; generated automatically when omitted.": (
+        "客户端生成的幂等键；省略时自动生成。"
+    ),
+    "Remote job ID.": "远程任务 ID。",
+    "Filter by job state.": "按任务状态筛选。",
+    "Number of trailing lines.": "显示末尾日志行数。",
+    "Follow logs until completion.": "持续跟踪日志直到任务结束。",
+    "Log stream: all, stdout, or stderr.": "日志流：all、stdout 或 stderr。",
+    "Read stdout from this byte offset instead of tailing lines.": (
+        "从该字节偏移读取 stdout，不使用末尾行模式。"
+    ),
+    "Read stderr from this byte offset instead of tailing lines.": (
+        "从该字节偏移读取 stderr，不使用末尾行模式。"
+    ),
+    "Maximum bytes to read from each stream in offset mode.": (
+        "偏移读取模式下每个日志流的最大字节数。"
+    ),
+    "Polling interval in seconds.": "轮询间隔秒数。",
+    "Kill the remote process group immediately.": "立即强制终止远程进程组。",
+    "Minimum terminal job age, for example 12h or 7d.": (
+        "已结束任务的最短保留时间，例如 12h 或 7d。"
+    ),
+    "List jobs without removing them.": "只列出任务，不执行清理。",
     "Manage local instance configuration templates.": "管理本地实例配置模板。",
     "List local instance templates.": "列出本地实例模板。",
     "Show a local instance template.": "显示本地实例模板。",
@@ -140,7 +172,12 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Replace an instance's container port mappings.": "替换实例的容器端口映射。",
     "Manage scheduled shutdowns.": "管理定时关机。",
     "Schedule an instance shutdown.": "设置实例定时关机。",
+    "Show an instance scheduled shutdown.": "查询实例定时关机。",
+    "Extend an instance scheduled shutdown.": "延后实例定时关机。",
     "Cancel an instance scheduled shutdown.": "取消实例定时关机。",
+    "Positive duration to add to the current shutdown time, for example 2h.": (
+        "在当前关机时间上增加的正时长，例如 2h。"
+    ),
     "Unix timestamp or ISO 8601 time.": "Unix 时间戳或 ISO 8601 时间。",
     "Discover software exposed by instances.": "查询实例提供的软件入口。",
     "List supported instance software.": "列出实例支持的软件。",
@@ -375,6 +412,9 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "STOP TIME": "关机时间",
     "UPDATE TIME": "更新时间",
     "SCHEDULER STOP TIME": "定时关机时间",
+    "PREVIOUS STOP TIME": "原定时关机时间",
+    "EXTENDED BY": "延后时长",
+    "UNIX": "Unix 时间戳",
     "RELEASE TIME": "释放时间",
     "DESCRIPTION": "描述",
     "INSTANCE": "实例",
@@ -393,6 +433,7 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "TYPE": "类型",
     "AUTHOR": "作者",
     "STATUS": "状态",
+    "SOURCE": "来源",
     "VERSION": "版本",
     "TAGS": "标签",
     "ACCOUNT ID": "账户 ID",
@@ -486,10 +527,8 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "JSON mode cannot prompt for credentials; pass --public-key and --private-key.": (
         "JSON 模式不能交互读取凭证；请传入 --public-key 和 --private-key。"
     ),
-    "Global option --json must appear before the command, for example: "
-    "compshare --json instance list.": (
-        "全局选项 --json 必须放在命令之前，例如：compshare --json instance list。"
-    ),
+    "Option --profile requires a value.": "选项 --profile 需要一个值。",
+    "Option --profile may only be specified once.": "选项 --profile 只能指定一次。",
     (
         "No inventory is available for the selected GPU, CPU, memory, image, billing, "
         "and disk combination."
@@ -522,8 +561,30 @@ ZH_TRANSLATIONS: Dict[str, str] = {
         "定时关机时间必须至少晚于当前时间 5 分钟。"
     ),
     "Scheduled shutdown": "已设置定时关机",
+    "Shutdown schedule": "定时关机计划",
+    "Extended scheduled shutdown": "已延后定时关机",
+    "Scheduled": "已设置",
+    "Not scheduled": "未设置",
+    "The API returned an invalid scheduled shutdown time: {value}.": (
+        "API 返回了无效的定时关机时间：{value}。"
+    ),
+    "Instance {instance} has no scheduled shutdown; use `compshare instance schedule set`.": (
+        "实例 {instance} 没有定时关机计划；请使用 `compshare instance schedule set`。"
+    ),
+    "The scheduled shutdown for {instance} has already expired; use "
+    "`compshare instance schedule set`.": (
+        "实例 {instance} 的定时关机计划已过期；请使用 `compshare instance schedule set`。"
+    ),
+    "Scheduled shutdown verification failed: expected {expected}, got {actual}.": (
+        "定时关机校验失败：预期 {expected}，实际 {actual}。"
+    ),
     "Cancel scheduled shutdown for {instance}?": "取消实例 {instance} 的定时关机？",
     "Cancelled shutdown": "已取消定时关机",
+    "Environment variables": "环境变量",
+    "Profile file": "配置文件",
+    "Profile and environment": "配置文件和环境变量",
+    "Incomplete credentials": "凭证不完整",
+    "Not configured": "未配置",
     "Instance {instance} has no SSH login command.": "实例 {instance} 没有可用的 SSH 登录命令。",
     "The API did not return a password. Run `compshare instance password {instance}` to set one.": (
         "API 未返回密码。请运行 `compshare instance password {instance}` 设置密码。"
@@ -711,6 +772,53 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Billing summary": "账单汇总",
     "Unpaid summary": "未支付订单汇总",
     "Export completed": "导出完成",
+    "Submitting remote job {job_id}...": "正在提交远程任务 {job_id}…",
+    "Submitted remote job {job_id}": "已提交远程任务 {job_id}",
+    "Remote job {job_id} already exists": "远程任务 {job_id} 已存在",
+    "Remote job {job_id} returned no status.": "远程任务 {job_id} 未返回状态。",
+    "Remote job {job_id} command failed: {detail}": "远程任务 {job_id} 操作失败：{detail}",
+    "Unable to parse the remote job response: {detail}": "无法解析远程任务响应：{detail}",
+    "Remote job {job_id} logs ({state})": "远程任务 {job_id} 日志（{state}）",
+    "--stream must be all, stdout, or stderr.": "--stream 必须是 all、stdout 或 stderr。",
+    "--state must be one of: {states}.": "--state 必须是以下值之一：{states}。",
+    "JSON mode does not support --follow; poll logs with byte offsets instead.": (
+        "JSON 模式不支持 --follow；请使用字节偏移轮询日志。"
+    ),
+    "Job ID must be 1-64 letters, numbers, dots, underscores, or hyphens, "
+    "and must start with a letter or number.": (
+        "任务 ID 长度必须为 1–64，只能包含字母、数字、点、下划线或连字符，且必须以字母或数字开头。"
+    ),
+    "Duration must use a positive integer followed by s, m, h, d, or w.": (
+        "时长必须是正整数加 s、m、h、d 或 w 单位。"
+    ),
+    "A remote command is required after --.": "必须在 -- 后提供远程命令。",
+    "--tail must be positive.": "--tail 必须为正数。",
+    "--stdout-offset cannot be negative.": "--stdout-offset 不能为负数。",
+    "--stderr-offset cannot be negative.": "--stderr-offset 不能为负数。",
+    "--limit must be positive.": "--limit 必须为正数。",
+    "Wait timeout and polling interval must be positive.": "等待超时和轮询间隔必须为正数。",
+    "Prune duration must be positive.": "清理时长必须为正数。",
+    "Cancel remote job {job_id} on {instance}?": "取消实例 {instance} 上的远程任务 {job_id}？",
+    "Cancellation requested for remote job {job_id}": "已请求取消远程任务 {job_id}",
+    "Remove terminal remote jobs older than {duration} from {instance}?": (
+        "清理实例 {instance} 上结束时间超过 {duration} 的远程任务？"
+    ),
+    "Removed {count} remote jobs": "已清理 {count} 个远程任务",
+    "Remote job": "远程任务",
+    "Starting": "启动中",
+    "Running": "运行中",
+    "Cancelling": "取消中",
+    "Cancelled": "已取消",
+    "Interrupted": "已中断",
+    "JOB ID": "任务 ID",
+    "PID": "PID",
+    "EXIT CODE": "退出码",
+    "CREATED TIME": "创建时间",
+    "STARTED TIME": "开始时间",
+    "FINISHED TIME": "结束时间",
+    "CWD": "工作目录",
+    "COMMAND": "命令",
+    "WAIT TIMED OUT": "等待超时",
     "Version {version}; Python 3.9 or newer is required.": (
         "版本 {version}；要求 Python 3.9 或更高版本。"
     ),
@@ -732,6 +840,10 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Success": "成功",
     "Warning": "警告",
     "Failed": "失败",
+    "Some instance operations failed.": "部分实例操作失败。",
+    "Some team invitations failed.": "部分团队邀请失败。",
+    "Some team quota updates failed.": "部分团队额度操作失败。",
+    "One or more diagnostic checks failed.": "一个或多个诊断检查失败。",
     "TEAM ID": "团队 ID",
     "MEMBERS": "成员数",
     "USER ID": "用户企业 ID",

@@ -244,6 +244,11 @@ def send_invites(
     )
     errors = response.get("ErrorMap") or {}
     result = {**response, "ok": not errors}
+    if errors:
+        result["error"] = {
+            "code": "partial_failure",
+            "message": tr("Some team invitations failed."),
+        }
     if state.json_output:
         Renderer(True, state.show_sensitive).data(result)
     elif errors:
@@ -327,6 +332,15 @@ def list_members(ctx: typer.Context, team: int = typer.Argument(..., help="Team 
         response,
         rows=_member_rows(response),
         columns=MEMBER_COLUMNS,
+        json_list=True,
+        json_fields=(
+            "UserCompanyId",
+            "VirtualCompanyId",
+            "RemarkName",
+            "Status",
+            "AllocateAmount",
+            "AvailableAmount",
+        ),
     )
 
 
@@ -377,6 +391,11 @@ def _quota(
     )
     failed = response.get("FailedMembers") or {}
     result = {**response, "ok": not failed}
+    if failed:
+        result["error"] = {
+            "code": "partial_failure",
+            "message": tr("Some team quota updates failed."),
+        }
     Renderer(state.json_output, state.show_sensitive).details(
         "Operation completed",
         [
@@ -435,9 +454,7 @@ def _order_sort(value: str) -> str:
     }
     normalized = aliases.get(normalized, normalized)
     if normalized not in {"create_time", "order_start_time", "order_end_time"}:
-        raise UsageError(
-            tr("--sort must be create_time, order_start_time, or order_end_time.")
-        )
+        raise UsageError(tr("--sort must be create_time, order_start_time, or order_end_time."))
     return normalized
 
 
@@ -484,6 +501,8 @@ def list_orders(
         response,
         rows=response.get("OrderInfos") or [],
         columns=ORDER_COLUMNS,
+        json_list=True,
+        metadata={"all": all_results},
     )
 
 
@@ -569,6 +588,7 @@ def products(
         response,
         rows=rows,
         columns=(("ProductType", "PRODUCT"),),
+        json_list=True,
     )
 
 
@@ -663,4 +683,6 @@ def audit(
             ("Status", "STATUS"),
             ("Content", "MESSAGE"),
         ),
+        json_list=True,
+        metadata={"all": all_results},
     )

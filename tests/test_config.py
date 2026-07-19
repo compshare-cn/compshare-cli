@@ -40,6 +40,35 @@ def test_environment_overrides_profile(monkeypatch, tmp_path) -> None:
     assert set(vars(loaded)) == {"public_key", "private_key"}
 
 
+def test_credential_status_reports_environment_profile_and_mixed_sources(
+    monkeypatch, tmp_path
+) -> None:
+    store = ConfigStore(tmp_path / "config.json")
+    store.save_profile("default", Profile("stored-public", "stored-private"))
+
+    monkeypatch.delenv("COMPSHARE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("COMPSHARE_PRIVATE_KEY", raising=False)
+    assert store.credential_status() == {
+        "credential_source": "profile",
+        "selected_profile": "default",
+        "profile_exists": True,
+        "credential_sources": {
+            "public_key_source": "profile",
+            "private_key_source": "profile",
+        },
+    }
+
+    monkeypatch.setenv("COMPSHARE_PUBLIC_KEY", "env-public")
+    assert store.credential_status()["credential_source"] == "mixed"
+    assert store.credential_status()["credential_sources"] == {
+        "public_key_source": "environment",
+        "private_key_source": "profile",
+    }
+
+    monkeypatch.setenv("COMPSHARE_PRIVATE_KEY", "env-private")
+    assert store.credential_status()["credential_source"] == "environment"
+
+
 def test_language_is_saved_outside_credential_profiles(tmp_path) -> None:
     path = tmp_path / "config.json"
     store = ConfigStore(path)

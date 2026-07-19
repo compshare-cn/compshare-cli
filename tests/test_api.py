@@ -1,3 +1,9 @@
+import json
+
+import pytest
+import typer
+from ucloud.core import exc as ucloud_exc
+
 from compshare_cli import api
 from compshare_cli.config import Profile
 from compshare_cli.runtime import Runtime
@@ -102,3 +108,39 @@ def test_sdk_region_comes_only_from_current_request(monkeypatch) -> None:
     api.call(state, "GlobalAction", {})
 
     assert regions == ["cn-sh2", None]
+
+
+def test_api_error_uses_stable_json_contract(monkeypatch, capsys) -> None:
+    class FakeSDK:
+        def __init__(self, profile, region):
+            pass
+
+        def invoke(self, action, params):
+            raise ucloud_exc.RetCodeException(
+                action=action,
+                code=171,
+                message="Signature verification failed",
+                request_uuid="request-1",
+            )
+
+    monkeypatch.setattr(api, "CompShareSDK", FakeSDK)
+    state = Runtime(json_output=True, _profile=Profile("public", "private"))
+
+    with pytest.raises(typer.Exit):
+        api.call(state, "DescribeCompShareSupportZone", {})
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": False,
+        "schema_version": "1",
+        "error": {
+            "code": "api_error",
+            "message": "Signature verification failed",
+            "details": {
+                "action": "DescribeCompShareSupportZone",
+                "ret_code": 171,
+                "request_uuid": "request-1",
+                "hint": None,
+            },
+        },
+    }

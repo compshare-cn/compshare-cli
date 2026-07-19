@@ -46,6 +46,7 @@ def list_disks(
             ("MountInstance", "INSTANCE"),
             ("Zone", "ZONE"),
         ),
+        json_list=True,
     )
 
 

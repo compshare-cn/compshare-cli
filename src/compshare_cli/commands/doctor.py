@@ -127,6 +127,11 @@ def run(state: Runtime) -> None:
 
     ok = not any(item["Status"] == "Failed" for item in checks)
     payload = {"ok": ok, "checks": checks}
+    if not ok:
+        payload["error"] = {
+            "code": "diagnostic_failed",
+            "message": tr("One or more diagnostic checks failed."),
+        }
     Renderer(state.json_output, state.show_sensitive).data(
         payload,
         rows=checks,

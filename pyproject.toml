@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "compshare-cli"
-version = "0.3.3"
+dynamic = ["version"]
 description = "Command-line client for CompShare GPU compute"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -38,6 +38,9 @@ dev = [
 [project.scripts]
 compshare = "compshare_cli.cli:main"
 compshare-ssh-askpass = "compshare_cli.ssh:askpass"
+
+[tool.setuptools.dynamic]
+version = { attr = "compshare_cli.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

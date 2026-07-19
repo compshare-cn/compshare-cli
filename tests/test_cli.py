@@ -9,10 +9,31 @@ from compshare_cli.commands import doctor as doctor_module
 from compshare_cli.commands import image as image_module
 from compshare_cli.commands import instance, storage, team
 from compshare_cli.config import ConfigStore, Profile
+from compshare_cli.errors import UsageError
 from compshare_cli.i18n import localize_command
+from compshare_cli.runtime import Runtime
 from compshare_cli.ssh import RemoteExecutionResult
 
 runner = CliRunner()
+
+
+def _json_document(output: str) -> dict:
+    payload = json.loads(output)
+    assert payload["schema_version"] == "1"
+    assert isinstance(payload["ok"], bool)
+    return payload
+
+
+def _json_data(output: str) -> dict:
+    payload = _json_document(output)
+    assert payload["ok"] is True
+    return payload["data"]
+
+
+def _json_error(output: str) -> dict:
+    payload = _json_document(output)
+    assert payload["ok"] is False
+    return payload["error"]
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +50,7 @@ def isolate_ssh_cache(monkeypatch, tmp_path) -> None:
         ["--help"],
         ["instance", "--help"],
         ["instance", "template", "--help"],
+        ["instance", "job", "--help"],
         ["image", "--help"],
         ["storage", "--help"],
         ["storage", "disk", "--help"],
@@ -45,7 +67,7 @@ def test_help_tree(args) -> None:
 
 def test_global_json_is_accepted_before_command(capsys) -> None:
     cli.main(["--json", "version"])
-    assert json.loads(capsys.readouterr().out) == {"version": __version__}
+    assert _json_data(capsys.readouterr().out) == {"version": __version__}
 
 
 def test_version_flag(capsys) -> None:
@@ -54,9 +76,28 @@ def test_version_flag(capsys) -> None:
     assert capsys.readouterr().out.strip() == __version__
 
 
+def test_version_flag_respects_json(capsys) -> None:
+    cli.main(["--json", "--version"])
+
+    assert _json_data(capsys.readouterr().out) == {"version": __version__}
+
+
+def test_help_respects_json(capsys) -> None:
+    cli.main(["instance", "show", "--json", "--help"])
+
+    payload = _json_data(capsys.readouterr().out)
+    assert payload["command_path"] == "compshare instance show"
+    assert payload["help"]
+    assert {parameter["name"] for parameter in payload["parameters"]} >= {
+        "instance",
+        "ip",
+        "softwares",
+    }
+
+
 def test_global_profile_is_accepted_before_command(capsys) -> None:
     cli.main(["--profile", "testing", "--json", "version"])
-    assert json.loads(capsys.readouterr().out) == {"version": __version__}
+    assert _json_data(capsys.readouterr().out) == {"version": __version__}
 
 
 def test_no_args_shows_help_without_error(capsys) -> None:
@@ -75,14 +116,7 @@ def test_root_help_lists_config_first(capsys) -> None:
     assert help_text.index("config") < help_text.index("feedback") < help_text.index("doctor")
 
 
-def test_shell_completion_is_available(monkeypatch) -> None:
-    monkeypatch.setattr("typer.completion._get_shell_name", lambda: "zsh")
-
-    shown = runner.invoke(cli.app, ["--show-completion"], prog_name="compshare")
-    assert shown.exit_code == 0, shown.output
-    assert "#compdef compshare" in shown.stdout
-    assert "_COMPSHARE_COMPLETE=complete_zsh" in shown.stdout
-
+def test_shell_completion_is_available() -> None:
     completed = runner.invoke(
         cli.app,
         [],
@@ -96,13 +130,76 @@ def test_shell_completion_is_available(monkeypatch) -> None:
     assert '"show"' in completed.stdout
 
 
-def test_global_options_after_command_are_rejected(capsys) -> None:
+def test_show_completion_is_not_exposed() -> None:
+    help_result = runner.invoke(cli.app, ["--help"])
+    assert help_result.exit_code == 0, help_result.output
+    assert "--install-completion" in help_result.stdout
+    assert "--show-completion" not in help_result.stdout
+
+    removed = runner.invoke(cli.app, ["--show-completion"])
+    assert removed.exit_code != 0
+
+
+def test_global_options_are_accepted_after_command(capsys) -> None:
+    cli.main(["version", "--json"])
+
+    assert _json_data(capsys.readouterr().out) == {"version": __version__}
+
+
+def test_profile_and_sensitive_options_are_accepted_after_command(monkeypatch) -> None:
+    states = []
+    monkeypatch.setattr(doctor_module, "run", states.append)
+
+    cli.main(["doctor", "--profile=testing", "--show-sensitive", "--json"])
+
+    assert len(states) == 1
+    assert states[0].profile_name == "testing"
+    assert states[0].show_sensitive is True
+    assert states[0].json_output is True
+
+
+def test_global_option_normalization_stops_at_command_separator() -> None:
+    argv = [
+        "instance",
+        "ssh",
+        "uhost-1",
+        "--show-sensitive",
+        "--",
+        "echo",
+        "--json",
+        "--profile",
+        "remote",
+    ]
+
+    assert cli._normalize_global_options(argv) == [
+        "--show-sensitive",
+        "instance",
+        "ssh",
+        "uhost-1",
+        "--",
+        "echo",
+        "--json",
+        "--profile",
+        "remote",
+    ]
+
+
+@pytest.mark.parametrize(
+    "args,message",
+    [
+        (["doctor", "--profile"], "需要一个值"),
+        (["doctor", "--profile="], "需要一个值"),
+        (["--profile", "first", "doctor", "--profile", "second"], "只能指定一次"),
+    ],
+)
+def test_global_profile_position_errors_are_clear(args, message, capsys) -> None:
     with pytest.raises(SystemExit) as raised:
-        cli.main(["version", "--json"])
+        cli.main(["--json", *args])
+
     assert raised.value.code == 2
-    error = json.loads(capsys.readouterr().out)["error"]
-    assert "No such option: --json" in error
-    assert "compshare --json instance list" in error
+    error = _json_error(capsys.readouterr().out)
+    assert error["code"] == "invalid_usage"
+    assert message in error["message"]
 
 
 def test_json_config_does_not_prompt_for_credentials(capsys) -> None:
@@ -112,7 +209,7 @@ def test_json_config_does_not_prompt_for_credentials(capsys) -> None:
     assert raised.value.code == 2
     output = capsys.readouterr().out
     assert "公钥:" not in output
-    assert "--public-key" in json.loads(output)["error"]
+    assert "--public-key" in _json_error(output)["message"]
 
 
 def test_config_error_is_json(monkeypatch, tmp_path, capsys) -> None:
@@ -122,9 +219,10 @@ def test_config_error_is_json(monkeypatch, tmp_path, capsys) -> None:
     with pytest.raises(SystemExit) as raised:
         cli.main(["--json", "instance", "list"])
     assert raised.value.code == 1
-    payload = json.loads(capsys.readouterr().out)
+    payload = _json_document(capsys.readouterr().out)
     assert payload["ok"] is False
-    assert "尚未配置" in payload["error"]
+    assert payload["error"]["code"] == "configuration_error"
+    assert "尚未配置" in payload["error"]["message"]
 
 
 def test_credential_configuration_does_not_include_resource_scope() -> None:
@@ -141,7 +239,7 @@ def test_credential_configuration_does_not_include_resource_scope() -> None:
     assert "--project-id" not in config_help.stdout
     assert "--project-id" in schedule_help.stdout
     assert "--install-completion" in root_help.stdout
-    assert "--show-completion" in root_help.stdout
+    assert "--show-completion" not in root_help.stdout
     assert "--region" not in root_help.stdout
     assert "--zone" not in root_help.stdout
     assert "--show-sensitive" in root_help.stdout
@@ -161,7 +259,15 @@ def test_config_profile_commands(monkeypatch, tmp_path) -> None:
 
     listed = runner.invoke(cli.app, ["--json", "config", "list"])
     assert listed.exit_code == 0, listed.output
-    assert json.loads(listed.stdout)["profiles"] == [{"Profile": "work", "Active": True}]
+    payload = _json_data(listed.stdout)
+    assert payload["credential_source"] == "environment"
+    assert payload["current_profile"] is None
+    assert payload["selected_profile"] == "work"
+    assert payload["credential_sources"] == {
+        "public_key_source": "environment",
+        "private_key_source": "environment",
+    }
+    assert payload["profiles"] == [{"Profile": "work", "Active": False, "Source": "profile"}]
 
     shown_path = runner.invoke(cli.app, ["config", "path"])
     assert shown_path.exit_code == 0
@@ -169,6 +275,48 @@ def test_config_profile_commands(monkeypatch, tmp_path) -> None:
 
     deleted = runner.invoke(cli.app, ["config", "delete", "work", "--yes"])
     assert deleted.exit_code == 0, deleted.output
+
+
+def test_config_list_explains_environment_credentials_without_profiles(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(tmp_path / "missing.json"))
+
+    listed = runner.invoke(cli.app, ["--json", "config", "list"])
+
+    assert listed.exit_code == 0, listed.output
+    assert _json_data(listed.stdout) == {
+        "credential_source": "environment",
+        "selected_profile": "default",
+        "profile_exists": False,
+        "credential_sources": {
+            "public_key_source": "environment",
+            "private_key_source": "environment",
+        },
+        "current_profile": None,
+        "profiles": [],
+    }
+
+    human = runner.invoke(cli.app, ["config", "list"])
+    assert human.exit_code == 0, human.output
+    assert "环境变量" in human.stdout
+
+
+def test_config_list_marks_profile_credentials_as_active(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(path))
+    monkeypatch.delenv("COMPSHARE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("COMPSHARE_PRIVATE_KEY", raising=False)
+    ConfigStore().save_profile("work", Profile("public", "private"))
+
+    listed = runner.invoke(cli.app, ["--json", "config", "list"])
+
+    assert listed.exit_code == 0, listed.output
+    payload = _json_data(listed.stdout)
+    assert payload["credential_source"] == "profile"
+    assert payload["current_profile"] == "work"
+    assert payload["selected_profile"] == "work"
+    assert payload["profiles"] == [{"Profile": "work", "Active": True, "Source": "profile"}]
 
 
 def test_confirmation_retries_empty_and_invalid_answers(monkeypatch, tmp_path) -> None:
@@ -199,7 +347,7 @@ def test_json_confirmation_requires_yes_without_prompt(monkeypatch, tmp_path, ca
     assert raised.value.code == 2
     output = capsys.readouterr().out
     assert "[y/N]" not in output
-    assert "--yes" in json.loads(output)["error"]
+    assert "--yes" in _json_error(output)["message"]
     assert "work" in ConfigStore().list_profiles()
 
 
@@ -237,7 +385,7 @@ def test_lang_option_applies_to_command_and_json_output(monkeypatch, tmp_path, c
     monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(tmp_path / "config.json"))
     monkeypatch.delenv("COMPSHARE_LANG", raising=False)
     cli.main(["--lang", "en", "--json", "version"])
-    assert json.loads(capsys.readouterr().out) == {"version": __version__}
+    assert _json_data(capsys.readouterr().out) == {"version": __version__}
     assert ConfigStore().load_language() == "en"
 
 
@@ -328,9 +476,7 @@ def test_storage_disk_list_uses_disk_inventory_and_resource_id(monkeypatch) -> N
     )
 
     assert result.exit_code == 0, result.output
-    assert calls == [
-        ("DescribeCompshareDisk", {"HostId": "uhost-1", "Region": "cn-sh2"})
-    ]
+    assert calls == [("DescribeCompshareDisk", {"HostId": "uhost-1", "Region": "cn-sh2"})]
     assert "udisk-abcdefghijklmnop" in result.stdout
 
 
@@ -387,15 +533,100 @@ def test_platform_image_list_applies_global_limit_across_types(monkeypatch) -> N
     )
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
+    payload = _json_document(result.stdout)
     assert calls == ["System", "App", "Game", "Other"]
-    assert payload["TotalCount"] == 8
-    assert payload["ReturnedCount"] == 3
-    assert [item["CompShareImageId"] for item in payload["ImageSet"]] == [
+    assert payload["meta"]["total"] == 8
+    assert payload["meta"]["returned"] == 3
+    assert [item["CompShareImageId"] for item in payload["data"]["items"]] == [
         "System-1",
         "App-0",
         "App-1",
     ]
+
+
+def test_community_image_json_list_omits_large_detail_fields(monkeypatch) -> None:
+    monkeypatch.setattr(
+        image_module,
+        "collect_pages",
+        lambda *args, **kwargs: {
+            "CompshareImageGroup": [
+                {
+                    "GroupId": "group-1",
+                    "ImageName": "Training",
+                    "Status": "Available",
+                    "Data": [
+                        {
+                            "CompShareImageId": "image-1",
+                            "ImageType": "Community",
+                            "Author": "author",
+                            "Readme": "large-detail" * 1000,
+                        }
+                    ],
+                }
+            ],
+            "TotalCount": 1,
+            "ReturnedCount": 1,
+            "Offset": 0,
+            "Limit": 20,
+        },
+    )
+
+    result = runner.invoke(cli.app, ["--json", "image", "list", "--source", "community"])
+
+    assert result.exit_code == 0, result.output
+    assert "large-detail" not in result.stdout
+    payload = _json_document(result.stdout)
+    assert payload["data"]["items"][0] == {
+        "CompShareImageId": "image-1",
+        "Name": "Training",
+        "ImageType": "Community",
+        "Author": "author",
+        "Status": "Available",
+        "Price": None,
+        "VersionName": None,
+        "Tags": None,
+    }
+
+
+def test_image_show_uses_same_json_shape_for_grouped_sources(monkeypatch) -> None:
+    monkeypatch.setattr(
+        image_module,
+        "call",
+        lambda *args, **kwargs: {
+            "Action": "DescribeCommunityImagesResponse",
+            "RetCode": 0,
+            "request_uuid": "request-1",
+            "CompshareImageGroup": [
+                {
+                    "ImageName": "Training",
+                    "Data": [{"CompShareImageId": "image-1", "Readme": "detail"}],
+                }
+            ],
+        },
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "image", "show", "image-1", "--source", "community"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _json_document(result.stdout)
+    assert payload["data"] == {
+        "source": "community",
+        "image": {
+            "CompShareImageId": "image-1",
+            "Readme": "detail",
+            "Name": "Training",
+            "Status": None,
+            "GroupId": None,
+        },
+    }
+    assert payload["meta"] == {
+        "action": "DescribeCommunityImagesResponse",
+        "ret_code": 0,
+        "request_uuid": "request-1",
+    }
 
 
 def test_user_image_source_requires_user_id() -> None:
@@ -541,7 +772,7 @@ def test_search_checks_real_capacity_with_image(monkeypatch) -> None:
         },
     )
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
+    payload = _json_data(result.stdout)
     assert payload["Inventory"]["4090"][0]["ResourceEnough"] is True
     assert [action for action, _ in calls] == [
         "DescribeAvailableCompShareInstanceTypes",
@@ -680,9 +911,10 @@ def test_create_json_requires_explicit_parameters(capsys) -> None:
     with pytest.raises(SystemExit) as raised:
         cli.main(["--json", "instance", "create"])
     assert raised.value.code == 2
-    payload = json.loads(capsys.readouterr().out)
+    payload = _json_document(capsys.readouterr().out)
     assert payload["ok"] is False
-    assert "--gpu" in payload["error"]
+    assert payload["error"]["code"] == "invalid_usage"
+    assert "--gpu" in payload["error"]["message"]
 
 
 def test_local_instance_template_crud() -> None:
@@ -716,7 +948,7 @@ def test_local_instance_template_crud() -> None:
         ],
     )
     assert created.exit_code == 0, created.output
-    assert json.loads(created.stdout)["parameters"]["gpu"] == "4090"
+    assert _json_data(created.stdout)["parameters"]["gpu"] == "4090"
 
     listed = runner.invoke(cli.app, ["--json", "instance", "template", "list"])
     shown = runner.invoke(
@@ -725,15 +957,15 @@ def test_local_instance_template_crud() -> None:
     )
     assert listed.exit_code == 0, listed.output
     assert shown.exit_code == 0, shown.output
-    assert [item["name"] for item in json.loads(listed.stdout)["templates"]] == ["训练配置"]
-    assert json.loads(shown.stdout)["description"] == "4090 training"
+    assert [item["Name"] for item in _json_data(listed.stdout)["items"]] == ["训练配置"]
+    assert _json_data(shown.stdout)["description"] == "4090 training"
 
     deleted = runner.invoke(
         cli.app,
         ["--json", "instance", "template", "delete", "训练配置", "--yes"],
     )
     assert deleted.exit_code == 0, deleted.output
-    assert json.loads(deleted.stdout) == {"ok": True, "name": "训练配置"}
+    assert _json_data(deleted.stdout) == {"name": "训练配置"}
 
 
 def test_instance_create_loads_template_and_explicit_options_override(monkeypatch) -> None:
@@ -796,7 +1028,7 @@ def test_instance_create_loads_template_and_explicit_options_override(monkeypatc
     )
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
+    payload = _json_data(result.stdout)
     assert payload["template"] == "training"
     assert payload["request"]["GpuType"] == "4090"
     assert payload["request"]["CPU"] == 16
@@ -863,7 +1095,7 @@ def test_create_explicit_json_mode_skips_discovery(monkeypatch) -> None:
         "GetCompShareInstancePrice",
         "CreateCompShareInstance",
     ]
-    assert json.loads(result.stdout)["selection"]["ChargeType"] == "Postpay"
+    assert _json_data(result.stdout)["selection"]["ChargeType"] == "Postpay"
     assert waits == [("uhost-test", {"region": "cn-wlcb", "desired": {"Running"}, "timeout": 600})]
 
 
@@ -905,7 +1137,7 @@ def test_create_dry_run_never_calls_create(monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert calls == ["CheckCompShareResourceCapacity", "GetCompShareInstancePrice"]
-    assert json.loads(result.stdout)["dry_run"] is True
+    assert _json_data(result.stdout)["dry_run"] is True
 
 
 def test_instance_wait_polls_until_running(monkeypatch) -> None:
@@ -943,9 +1175,9 @@ def test_instance_wait_polls_until_running(monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert calls == ["StartCompShareInstance", "DescribeCompShareInstance"]
-    payload = json.loads(result.stdout)
+    payload = _json_document(result.stdout)
     assert payload["ok"] is True
-    assert payload["succeeded"][0]["final"]["UHostSet"][0]["State"] == "Running"
+    assert payload["data"]["succeeded"][0]["final"]["UHostSet"][0]["State"] == "Running"
 
 
 def test_stop_uses_region_and_zone_reported_by_describe(monkeypatch) -> None:
@@ -1018,6 +1250,127 @@ def test_schedule_auto_detects_project_id(monkeypatch) -> None:
     assert calls[1][1]["ProjectId"] == "org-default"
 
 
+def test_schedule_show_reports_current_plan(monkeypatch) -> None:
+    stop_time = 1_800_000_000
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-bj2",
+            "cn-bj2-03",
+            {
+                "UHostId": value,
+                "Region": "cn-bj2",
+                "Zone": "cn-bj2-03",
+                "SchedulerStopTime": stop_time,
+            },
+        ),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "schedule", "show", "uhost-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _json_data(result.stdout)
+    assert payload["instance"] == "uhost-1"
+    assert payload["scheduled"] is True
+    assert payload["scheduler_stop_time"] == stop_time
+    assert payload["scheduler_stop_at"]
+
+
+def test_schedule_show_reports_missing_plan(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-bj2",
+            "cn-bj2-03",
+            {"UHostId": value, "Region": "cn-bj2", "Zone": "cn-bj2-03"},
+        ),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "schedule", "show", "uhost-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _json_data(result.stdout) == {
+        "instance": "uhost-1",
+        "scheduled": False,
+        "scheduler_stop_time": None,
+        "scheduler_stop_at": None,
+    }
+
+
+def test_schedule_extend_updates_from_existing_time_and_verifies(monkeypatch) -> None:
+    now = 1_700_000_000
+    previous_stop_time = now + 3600
+    expected_stop_time = previous_stop_time + 7200
+    hosts = iter(
+        [
+            {"SchedulerStopTime": previous_stop_time},
+            {"SchedulerStopTime": expected_stop_time},
+        ]
+    )
+    monkeypatch.setattr(instance.time, "time", lambda: now)
+
+    def fake_locate(state, value, *, request_region=None):
+        host = next(hosts)
+        host.update({"UHostId": value, "Region": "cn-bj2", "Zone": "cn-bj2-03"})
+        return "cn-bj2", "cn-bj2-03", host
+
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append((action, params))
+        if action == "GetProjectList":
+            return {"ProjectSet": [{"ProjectId": "org-default", "IsDefault": True}]}
+        return {"RetCode": 0, "UHostId": "uhost-1"}
+
+    monkeypatch.setattr(instance, "locate_instance", fake_locate)
+    monkeypatch.setattr(instance, "call", fake_call)
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "schedule", "extend", "uhost-1", "--by", "2h"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0] == ("GetProjectList", {})
+    assert calls[1][0] == "UpdateCompShareStopScheduler"
+    assert calls[1][1]["Region"] == "cn-bj2"
+    assert calls[1][1]["Zone"] == "cn-bj2-03"
+    assert calls[1][1]["ProjectId"] == "org-default"
+    assert calls[1][1]["SchedulerStopTime"] == expected_stop_time
+    payload = _json_data(result.stdout)
+    assert payload["scheduled"] is True
+    assert payload["previous_stop_time"] == previous_stop_time
+    assert payload["scheduler_stop_time"] == expected_stop_time
+    assert payload["extended_by"] == "2h"
+    assert payload["extended_by_seconds"] == 7200
+
+
+def test_schedule_extend_requires_an_active_plan(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-bj2",
+            "cn-bj2-03",
+            {"UHostId": value, "Region": "cn-bj2", "Zone": "cn-bj2-03"},
+        ),
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--json", "instance", "schedule", "extend", "uhost-1", "--by", "2h"])
+
+    assert raised.value.code == 2
+    assert "schedule set" in _json_error(capsys.readouterr().out)["message"]
+
+
 def test_unavailable_instance_commands_are_not_exposed() -> None:
     instance_help = runner.invoke(cli.app, ["instance", "--help"])
     software_help = runner.invoke(cli.app, ["instance", "software", "--help"])
@@ -1065,15 +1418,23 @@ def test_instance_show_json_redacts_private_fields_unless_enabled(monkeypatch) -
     )
 
     assert safe_result.exit_code == 0, safe_result.output
-    safe_host = json.loads(safe_result.stdout)["UHostSet"][0]
+    safe_payload = _json_document(safe_result.stdout)
+    safe_host = safe_payload["data"]["UHostSet"][0]
     assert safe_host["Password"] == "***"
     assert safe_host["FileBrowserPassword"] == "***"
     assert safe_host["SshLoginCommand"] == "***"
     assert safe_host["IPSet"] == [{"IP": "***", "IPId": "ip-resource-id"}]
     assert safe_host["Softwares"] == [{"Name": "JupyterLab", "URL": "***"}]
+    assert safe_payload["meta"]["redacted_fields"] == [
+        "data.UHostSet[0].Password",
+        "data.UHostSet[0].FileBrowserPassword",
+        "data.UHostSet[0].SshLoginCommand",
+        "data.UHostSet[0].IPSet[0].IP",
+        "data.UHostSet[0].Softwares[0].URL",
+    ]
 
     assert private_result.exit_code == 0, private_result.output
-    assert json.loads(private_result.stdout)["UHostSet"][0] == host
+    assert _json_data(private_result.stdout)["UHostSet"][0] == host
 
     safe_human = runner.invoke(cli.app, ["instance", "show", "uhost-1"])
     private_human = runner.invoke(
@@ -1199,20 +1560,62 @@ def test_instance_show_focus_flags_return_only_selected_groups(monkeypatch) -> N
     for option, keys in expected.items():
         result = runner.invoke(cli.app, ["--json", "instance", "show", "uhost-1", option])
         assert result.exit_code == 0, result.output
-        assert set(json.loads(result.stdout)["UHostSet"][0]) == keys
+        assert set(_json_data(result.stdout)["UHostSet"][0]) == {
+            "UHostId",
+            "Name",
+            "Region",
+            "Zone",
+            *keys,
+        }
 
     combined = runner.invoke(
         cli.app,
         ["--json", "--show-sensitive", "instance", "show", "uhost-1", "--ip", "--softwares"],
     )
     assert combined.exit_code == 0, combined.output
-    assert json.loads(combined.stdout) == {
+    assert _json_data(combined.stdout) == {
         "UHostSet": [
             {
+                "UHostId": "uhost-1",
+                "Name": "training",
+                "Region": "cn-sh2",
+                "Zone": "cn-sh2-02",
                 "IPSet": [{"Type": "Bgp", "IP": "203.0.113.10"}],
                 "Softwares": [{"Name": "JupyterLab", "URL": "https://example.invalid/token"}],
             }
         ]
+    }
+
+
+def test_instance_show_focus_keeps_identity_and_empty_collections(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-sh2",
+            "cn-sh2-02",
+            {"UHostId": value, "Name": "training"},
+        ),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "show", "uhost-1", "--ip", "--softwares", "--disks"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _json_data(result.stdout)["UHostSet"][0] == {
+        "UHostId": "uhost-1",
+        "Name": "training",
+        "Region": "cn-sh2",
+        "Zone": "cn-sh2-02",
+        "IPSet": [],
+        "Softwares": [],
+        "DiskSet": [],
+        "UDiskSet": [],
+        "VolumeSet": [],
+        "TotalDiskSpace": None,
+        "TotalVolumeSpace": None,
     }
 
 
@@ -1242,6 +1645,287 @@ def test_instance_show_focused_human_output_still_redacts_sensitive_values(monke
     assert "https://example.invalid/token" in private.stdout
 
 
+def test_remote_job_submit_is_agent_friendly_and_idempotent(monkeypatch) -> None:
+    scripts = []
+
+    def run_job(state, instance_id, script, **kwargs):
+        scripts.append((instance_id, script, kwargs))
+        return [
+            {
+                "JobId": "job-release",
+                "Name": "release",
+                "State": "Running",
+                "PID": 123,
+                "ExitCode": None,
+                "CreatedTime": 100,
+                "StartedTime": 101,
+                "FinishedTime": None,
+                "Cwd": "/workspace/project",
+                "Command": "python train.py --epochs 10",
+                "Existing": False,
+            }
+        ]
+
+    monkeypatch.setattr(instance, "_remote_job_records", run_job)
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "instance",
+            "job",
+            "submit",
+            "uhost-1",
+            "--name",
+            "release",
+            "--cwd",
+            "/workspace/project",
+            "--job-id",
+            "job-release",
+            "--",
+            "python",
+            "train.py",
+            "--epochs",
+            "10",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _json_data(result.stdout)
+    assert payload["instance"] == "uhost-1"
+    assert payload["job"]["JobId"] == "job-release"
+    assert payload["job"]["Command"] == "***"
+    assert scripts[0][0] == "uhost-1"
+    assert scripts[0][2] == {"job_id": "job-release"}
+    assert "python train.py --epochs 10" in scripts[0][1]
+    assert "/workspace/project" in scripts[0][1]
+
+
+def test_remote_job_execution_reuses_ssh_password_automation(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "_locate_ssh_instance",
+        lambda *args, **kwargs: (
+            "cn-sh2",
+            "cn-sh2-02",
+            {
+                "State": "Running",
+                "SshLoginCommand": "ssh -p 2222 root@example.invalid",
+                "Password": "instance-secret",
+            },
+            "api",
+        ),
+    )
+    executions = []
+    monkeypatch.setattr(
+        instance,
+        "execute_captured_with_password",
+        lambda argv, password: (
+            executions.append((argv, password))
+            or RemoteExecutionResult(0, "ignored", "", "completed")
+        ),
+    )
+    monkeypatch.setattr(instance, "parse_records", lambda output: [{"JobId": "job-test"}])
+
+    records = instance._remote_job_records(
+        Runtime(_profile=Profile("public", "private")),
+        "uhost-1",
+        "printf test",
+        job_id="job-test",
+    )
+
+    assert records == [{"JobId": "job-test"}]
+    assert executions[0][1] == "instance-secret"
+    assert executions[0][0][0:6] == [
+        "ssh",
+        "-o",
+        "ConnectTimeout=30",
+        "-p",
+        "2222",
+        "root@example.invalid",
+    ]
+    assert executions[0][0][-1].startswith("sh -c ")
+
+
+def test_remote_job_execution_reports_remote_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "_remote_job_connection",
+        lambda *args, **kwargs: (["ssh", "example.invalid"], None, "api"),
+    )
+    monkeypatch.setattr(
+        instance,
+        "execute_captured",
+        lambda argv: RemoteExecutionResult(127, "", "setsid: not found", "completed"),
+    )
+
+    with pytest.raises(UsageError, match="setsid: not found"):
+        instance._remote_job_records(
+            Runtime(_profile=Profile("public", "private")),
+            "uhost-1",
+            "printf test",
+            job_id="job-test",
+        )
+
+
+def test_remote_job_list_filters_state(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "_remote_job_records",
+        lambda *args, **kwargs: [
+            {"JobId": "job-old", "State": "Succeeded", "CreatedTime": 10},
+            {"JobId": "job-new", "State": "Running", "CreatedTime": 20},
+        ],
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "job", "list", "uhost-1", "--state", "running"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _json_document(result.stdout)
+    assert payload["data"] == {
+        "items": [
+            {
+                "JobId": "job-new",
+                "Name": None,
+                "State": "Running",
+                "PID": None,
+                "ExitCode": None,
+                "CreatedTime": 20,
+            }
+        ]
+    }
+    assert payload["meta"] == {"total": 1, "returned": 1, "instance": "uhost-1"}
+
+
+def test_remote_job_logs_return_resumable_offsets(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "_remote_job_records",
+        lambda *args, **kwargs: [
+            {
+                "JobId": "job-train",
+                "State": "Running",
+                "Mode": "offset",
+                "Stdout": "epoch 2\n",
+                "StdoutOffset": 8,
+                "StdoutNextOffset": 16,
+                "StdoutSize": 100,
+                "StdoutEOF": False,
+                "Stderr": "",
+                "StderrOffset": 0,
+                "StderrNextOffset": 0,
+                "StderrSize": 0,
+                "StderrEOF": True,
+            }
+        ],
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "instance",
+            "job",
+            "logs",
+            "uhost-1",
+            "job-train",
+            "--stdout-offset",
+            "8",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    logs = _json_data(result.stdout)["logs"]
+    assert logs["Stdout"] == "epoch 2\n"
+    assert logs["StdoutNextOffset"] == 16
+    assert logs["StdoutEOF"] is False
+
+
+def test_remote_job_follow_is_rejected_in_json_mode(monkeypatch, capsys) -> None:
+    streamed = []
+    monkeypatch.setattr(
+        instance,
+        "_remote_job_stream",
+        lambda *args, **kwargs: streamed.append((args, kwargs)) or 0,
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--json", "instance", "job", "logs", "uhost-1", "job-train", "--follow"])
+
+    assert raised.value.code == 2
+    assert "--follow" in _json_error(capsys.readouterr().out)["message"]
+    assert streamed == []
+
+
+def test_remote_job_wait_timeout_does_not_cancel(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "_remote_job_records",
+        lambda *args, **kwargs: [
+            {"JobId": "job-train", "State": "Running", "ExitCode": None},
+            {"WaitTimedOut": True},
+        ],
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "job", "wait", "uhost-1", "job-train", "--timeout", "1"],
+    )
+
+    assert result.exit_code == 124, result.output
+    job = _json_data(result.stdout)["job"]
+    assert job["State"] == "Running"
+    assert job["WaitTimedOut"] is True
+
+
+def test_remote_job_wait_propagates_remote_exit_code(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "_remote_job_records",
+        lambda *args, **kwargs: [
+            {"JobId": "job-build", "State": "Failed", "ExitCode": 7},
+            {"WaitTimedOut": False},
+        ],
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["--json", "instance", "job", "wait", "uhost-1", "job-build"],
+    )
+
+    assert result.exit_code == 7, result.output
+    assert _json_data(result.stdout)["job"]["ExitCode"] == 7
+
+
+def test_remote_job_cancel_requires_explicit_yes_in_json_mode(monkeypatch, capsys) -> None:
+    calls = []
+    monkeypatch.setattr(
+        instance,
+        "_remote_job_records",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or [],
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--json", "instance", "job", "cancel", "uhost-1", "job-train"])
+    assert raised.value.code == 2
+    assert "--yes" in _json_error(capsys.readouterr().out)["message"]
+    assert calls == []
+
+    monkeypatch.setattr(
+        instance,
+        "_remote_job_records",
+        lambda *args, **kwargs: [{"JobId": "job-train", "State": "Cancelling"}],
+    )
+    cancelled = runner.invoke(
+        cli.app,
+        ["--json", "instance", "job", "cancel", "uhost-1", "job-train", "--yes"],
+    )
+    assert cancelled.exit_code == 0, cancelled.output
+    assert _json_data(cancelled.stdout)["job"]["State"] == "Cancelling"
+
+
 def test_ssh_print_redacts_sensitive_values_by_default(monkeypatch) -> None:
     monkeypatch.setattr(
         instance,
@@ -1263,12 +1947,14 @@ def test_ssh_print_redacts_sensitive_values_by_default(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == {
+    payload = _json_document(result.stdout)
+    assert payload["data"] == {
         "instance": "uhost-1",
         "command": "***",
         "password": "***",
         "credential_source": "api",
     }
+    assert payload["meta"]["redacted_fields"] == ["data.command", "data.password"]
 
 
 def test_ssh_print_includes_sensitive_values_only_with_global_flag(monkeypatch) -> None:
@@ -1292,7 +1978,7 @@ def test_ssh_print_includes_sensitive_values_only_with_global_flag(monkeypatch) 
     )
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == {
+    assert _json_data(result.stdout) == {
         "instance": "uhost-1",
         "command": "ssh root@example.invalid",
         "password": "instance-secret",
@@ -1326,8 +2012,8 @@ def test_ssh_reuses_cached_connection_data_without_describing_again(monkeypatch)
 
     assert first.exit_code == 0, first.output
     assert second.exit_code == 0, second.output
-    assert json.loads(first.stdout)["credential_source"] == "api"
-    assert json.loads(second.stdout)["credential_source"] == "cache"
+    assert _json_data(first.stdout)["credential_source"] == "api"
+    assert _json_data(second.stdout)["credential_source"] == "cache"
     assert descriptions == ["uhost-1"]
 
 
@@ -1566,20 +2252,18 @@ def test_ssh_json_executes_and_returns_structured_connection_error(monkeypatch) 
     )
 
     assert result.exit_code == 255, result.output
-    payload = json.loads(result.stdout)
-    assert payload == {
-        "instance": "uhost-1",
-        "ok": False,
-        "phase": "connection",
-        "exit_code": 255,
-        "stdout": "",
-        "stderr": "ssh: connect to host example.invalid port 22: Connection timed out\n",
-        "error": {
+    payload = _json_document(result.stdout)
+    assert payload["error"] == {
+        "code": "connection_timeout",
+        "message": "ssh: connect to host example.invalid port 22: Connection timed out",
+        "details": {
+            "instance": "uhost-1",
             "phase": "connection",
-            "code": "connection_timeout",
-            "message": "ssh: connect to host example.invalid port 22: Connection timed out",
+            "exit_code": 255,
+            "stdout": "",
+            "stderr": "ssh: connect to host example.invalid port 22: Connection timed out\n",
+            "credential_source": "api",
         },
-        "credential_source": "api",
     }
     assert executions == [
         (
@@ -1626,7 +2310,7 @@ def test_ssh_print_includes_quoted_remote_command_when_sensitive(monkeypatch) ->
     )
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == {
+    assert _json_data(result.stdout) == {
         "instance": "uhost-1",
         "command": "ssh root@example.invalid 'cd /workspace && python train.py'",
         "password": "instance-secret",
@@ -1850,7 +2534,7 @@ def test_scp_print_redacts_command_by_default(monkeypatch, tmp_path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == {
+    assert _json_data(result.stdout) == {
         "instance": "uhost-1",
         "command": "***",
     }
@@ -1900,14 +2584,12 @@ def test_json_scp_executes_and_returns_structured_result(monkeypatch, tmp_path) 
             "instance-secret",
         )
     ]
-    assert json.loads(result.stdout) == {
+    assert _json_data(result.stdout) == {
         "instance": "uhost-1",
-        "ok": True,
         "phase": "completed",
         "exit_code": 0,
         "stdout": "uploaded\n",
         "stderr": "",
-        "error": None,
     }
 
 
@@ -1946,13 +2628,18 @@ def test_json_scp_propagates_copy_failure(monkeypatch, tmp_path) -> None:
     )
 
     assert result.exit_code == 255
-    payload = json.loads(result.stdout)
+    payload = _json_document(result.stdout)
     assert payload["ok"] is False
-    assert payload["exit_code"] == 255
     assert payload["error"] == {
-        "phase": "authentication",
         "code": "authentication_failed",
         "message": "Permission denied",
+        "details": {
+            "instance": "uhost-1",
+            "phase": "authentication",
+            "exit_code": 255,
+            "stdout": "",
+            "stderr": "Permission denied",
+        },
     }
 
 
@@ -1978,11 +2665,11 @@ def test_instance_list_applies_global_pagination_after_filters(monkeypatch) -> N
     )
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["TotalCount"] == 5
-    assert payload["FilteredCount"] == 4
-    assert payload["ReturnedCount"] == 2
-    assert [item["UHostId"] for item in payload["UHostSet"]] == ["a-3", "b-1"]
+    payload = _json_document(result.stdout)
+    assert payload["meta"]["total"] == 5
+    assert payload["meta"]["filtered"] == 4
+    assert payload["meta"]["returned"] == 2
+    assert [item["UHostId"] for item in payload["data"]["items"]] == ["a-3", "b-1"]
 
 
 def test_instance_list_requires_region_and_zone_together(capsys) -> None:
@@ -1990,7 +2677,7 @@ def test_instance_list_requires_region_and_zone_together(capsys) -> None:
         cli.main(["--json", "instance", "list", "--region", "cn-sh2"])
 
     assert raised.value.code == 2
-    assert "--region" in json.loads(capsys.readouterr().out)["error"]
+    assert "--region" in _json_error(capsys.readouterr().out)["message"]
 
 
 def test_instance_list_passes_explicit_region_and_zone(monkeypatch) -> None:
@@ -2035,9 +2722,10 @@ def test_instance_list_all_ignores_display_limit(monkeypatch) -> None:
     result = runner.invoke(cli.app, ["--json", "instance", "list", "--all"])
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["Limit"] is None
-    assert payload["ReturnedCount"] == 25
+    payload = _json_document(result.stdout)
+    assert payload["meta"]["all"] is True
+    assert "limit" not in payload["meta"]
+    assert payload["meta"]["returned"] == 25
 
 
 def test_instance_list_does_not_invent_missing_region(monkeypatch) -> None:
@@ -2050,9 +2738,9 @@ def test_instance_list_does_not_invent_missing_region(monkeypatch) -> None:
     result = runner.invoke(cli.app, ["--json", "instance", "list", "--all"])
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert "Region" not in payload["UHostSet"][0]
-    assert payload["RegionSet"] == []
+    payload = _json_document(result.stdout)
+    assert payload["data"]["items"][0]["Region"] is None
+    assert payload["meta"]["regions"] == []
 
 
 def test_batch_lifecycle_reports_partial_failure(monkeypatch) -> None:
@@ -2078,10 +2766,11 @@ def test_batch_lifecycle_reports_partial_failure(monkeypatch) -> None:
     )
 
     assert result.exit_code == 1, result.output
-    payload = json.loads(result.stdout)
+    payload = _json_document(result.stdout)
     assert payload["ok"] is False
-    assert [item["instance"] for item in payload["succeeded"]] == ["host-1"]
-    assert payload["failed"][0]["instance"] == "host-2"
+    assert payload["error"]["code"] == "partial_failure"
+    assert [item["instance"] for item in payload["error"]["details"]["succeeded"]] == ["host-1"]
+    assert payload["error"]["details"]["failed"][0]["instance"] == "host-2"
 
 
 def test_create_max_price_stops_before_create(monkeypatch, capsys) -> None:
@@ -2124,7 +2813,7 @@ def test_create_max_price_stops_before_create(monkeypatch, capsys) -> None:
 
     assert raised.value.code == 2
     assert calls == ["CheckCompShareResourceCapacity", "GetCompShareInstancePrice"]
-    assert "0.7" in json.loads(capsys.readouterr().out)["error"]
+    assert "0.7" in _json_error(capsys.readouterr().out)["message"]
 
 
 def test_team_invite_builds_user_info(monkeypatch) -> None:
@@ -2163,9 +2852,10 @@ def test_team_invite_reports_partial_failure(monkeypatch) -> None:
     )
 
     assert result.exit_code == 1, result.output
-    payload = json.loads(result.stdout)
+    payload = _json_document(result.stdout)
     assert payload["ok"] is False
-    assert payload["ErrorMap"]["50002"]["Code"] == 16001
+    assert payload["error"]["code"] == "partial_failure"
+    assert payload["error"]["details"]["ErrorMap"]["50002"]["Code"] == 16001
 
 
 def test_team_quota_converts_yuan_to_cents(monkeypatch) -> None:
@@ -2225,9 +2915,10 @@ def test_team_quota_reports_partial_failure(monkeypatch) -> None:
     )
 
     assert result.exit_code == 1, result.output
-    payload = json.loads(result.stdout)
+    payload = _json_document(result.stdout)
     assert payload["ok"] is False
-    assert payload["FailedMembers"]["60002"]["Code"] == 17001
+    assert payload["error"]["code"] == "partial_failure"
+    assert payload["error"]["details"]["FailedMembers"]["60002"]["Code"] == 17001
 
 
 def test_team_billing_uses_api_sort_values(monkeypatch) -> None:
@@ -2289,7 +2980,7 @@ def test_team_unpaid_combines_orders_and_summary(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
+    payload = _json_data(result.stdout)
     assert payload["orders"]["OrderInfos"][0]["OrderNo"] == "order-1"
     assert payload["summary"]["Amount"] == "50.00"
     assert calls[0][1] == calls[1][1]
@@ -2310,7 +3001,7 @@ def test_team_export_writes_csv(monkeypatch, tmp_path) -> None:
 
     assert result.exit_code == 0, result.output
     assert output.read_bytes() == b"order,amount\n1,10\n"
-    assert json.loads(result.stdout)["path"] == str(output)
+    assert _json_data(result.stdout)["path"] == str(output)
 
 
 def test_doctor_is_read_only_and_json(monkeypatch, tmp_path) -> None:
@@ -2326,9 +3017,13 @@ def test_doctor_is_read_only_and_json(monkeypatch, tmp_path) -> None:
     result = runner.invoke(cli.app, ["--json", "doctor"])
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
+    payload = _json_document(result.stdout)
     assert payload["ok"] is True
-    assert {item["Check"] for item in payload["checks"]} >= {"Credentials", "API", "ssh"}
+    assert {item["Check"] for item in payload["data"]["checks"]} >= {
+        "Credentials",
+        "API",
+        "ssh",
+    }
 
 
 def test_doctor_does_not_treat_windows_mode_bits_as_posix_permissions(
@@ -2349,7 +3044,7 @@ def test_doctor_does_not_treat_windows_mode_bits_as_posix_permissions(
     result = runner.invoke(cli.app, ["--json", "doctor"])
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
+    payload = _json_data(result.stdout)
     permissions = next(item for item in payload["checks"] if item["Check"] == "Permissions")
     assert permissions["Status"] == "Warning"
     assert "Windows ACL" in permissions["Detail"]

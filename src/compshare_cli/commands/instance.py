@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import sys
 import time
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from pathlib import Path
@@ -29,6 +30,25 @@ from compshare_cli.parsing import (
     money,
     timestamp,
 )
+from compshare_cli.remote_jobs import (
+    JOB_STATES,
+    RemoteJobProtocolError,
+    cancel_script,
+    duration_seconds,
+    follow_script,
+    joined_command,
+    list_script,
+    logs_script,
+    new_job_id,
+    normalized_record,
+    parse_records,
+    prune_script,
+    shell_command,
+    show_script,
+    submit_script,
+    validate_job_id,
+    wait_script,
+)
 from compshare_cli.runtime import Runtime
 from compshare_cli.ssh import (
     PasswordAutomationUnavailable,
@@ -51,10 +71,12 @@ software_app = typer.Typer(help="Discover software exposed by instances.", no_ar
 template_app = typer.Typer(
     help="Manage local instance configuration templates.", no_args_is_help=True
 )
+job_app = typer.Typer(help="Manage durable remote instance jobs.", no_args_is_help=True)
 app.add_typer(ports_app, name="ports")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(software_app, name="software")
 app.add_typer(template_app, name="template")
+app.add_typer(job_app, name="job")
 
 INSTANCE_COLUMNS = (
     ("UHostId", "ID"),
@@ -68,6 +90,15 @@ INSTANCE_COLUMNS = (
     ("Zone", "ZONE"),
     ("ChargeType", "CHARGE"),
     ("InstancePrice", "PRICE/H"),
+)
+
+JOB_COLUMNS = (
+    ("JobId", "JOB ID"),
+    ("Name", "NAME"),
+    ("State", "STATE"),
+    ("PID", "PID"),
+    ("ExitCode", "EXIT CODE"),
+    ("CreatedTime", "CREATED"),
 )
 
 INSTANCE_SHOW_SECTION_KEYS = {
@@ -125,6 +156,16 @@ INSTANCE_SHOW_SECTION_KEYS = {
         "SchedulerStopTime",
         "ReleaseTime",
     ),
+}
+
+INSTANCE_COLLECTION_KEYS = {
+    "IPSet",
+    "Softwares",
+    "DiskSet",
+    "UDiskSet",
+    "VolumeSet",
+    "DiskPriceInfo",
+    "PostPayPowerOffBillingResource",
 }
 
 Choice = TypeVar("Choice")
@@ -415,6 +456,96 @@ def _locate_ssh_instance(
     if use_cache:
         cache.put(profile, instance, host)
     return region, zone, host, "api"
+
+
+def _remote_job_connection(
+    state: Runtime,
+    instance: str,
+    script: str,
+    *,
+    connect_timeout: int = 30,
+) -> Tuple[List[str], Optional[str], str]:
+    region, _, host, credential_source = _locate_ssh_instance(
+        state,
+        instance,
+        use_cache=True,
+        refresh=False,
+        cache_ttl=DEFAULT_TTL,
+    )
+    if host.get("State") and str(host.get("State")) != "Running":
+        ready = _wait_for_instance(
+            state,
+            instance,
+            region=region,
+            desired={"Running"},
+            timeout=600,
+        )
+        hosts = ready.get("UHostSet") or []
+        if hosts:
+            host = hosts[0]
+            SSHCredentialCache().put(_ssh_cache_profile(state), instance, host)
+
+    login_command = host.get("SshLoginCommand")
+    if not login_command:
+        raise UsageError(tr("Instance {instance} has no SSH login command.", instance=instance))
+    raw_password = host.get("Password")
+    password = decode_password(str(raw_password)) if raw_password is not None else None
+    argv = [*shlex.split(str(login_command))]
+    argv[1:1] = ["-o", f"ConnectTimeout={connect_timeout}"]
+    argv.append(shell_command(script))
+    return argv, password, credential_source
+
+
+def _remote_job_records(
+    state: Runtime,
+    instance: str,
+    script: str,
+    *,
+    job_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    argv, password, credential_source = _remote_job_connection(state, instance, script)
+    execution = (
+        execute_captured_with_password(argv, password) if password else execute_captured(argv)
+    )
+    protocol_error: Optional[RemoteJobProtocolError] = None
+    try:
+        records = parse_records(execution.stdout)
+    except RemoteJobProtocolError as error:
+        protocol_error = error
+        records = []
+
+    if not execution.ok:
+        if execution.phase in {"authentication", "connection", "ssh"}:
+            SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
+        message = str(protocol_error) if protocol_error else execution.stderr.strip()
+        if not message:
+            message = tr("SSH exited with status {status}.", status=execution.exit_code)
+        if job_id:
+            message = tr(
+                "Remote job {job_id} command failed: {detail}",
+                job_id=job_id,
+                detail=message,
+            )
+        raise UsageError(message)
+    if protocol_error is not None:
+        raise UsageError(
+            tr("Unable to parse the remote job response: {detail}", detail=protocol_error)
+        )
+    return [normalized_record(record) for record in records]
+
+
+def _remote_job_stream(state: Runtime, instance: str, script: str) -> int:
+    argv, password, credential_source = _remote_job_connection(state, instance, script)
+    exit_code = execute_with_password(argv, password) if password else subprocess.call(argv)
+    if exit_code == 255 and credential_source == "cache":
+        SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
+    return exit_code
+
+
+def _single_job_record(records: List[Dict[str, Any]], job_id: str) -> Dict[str, Any]:
+    if not records:
+        raise UsageError(tr("Remote job {job_id} returned no status.", job_id=job_id))
+    return records[0]
 
 
 def _wait_for_instance(
@@ -708,6 +839,8 @@ def list_templates(ctx: typer.Context) -> None:
             ("Zone", "ZONE"),
             ("Updated", "UPDATED"),
         ),
+        json_list=True,
+        metadata={"path": str(template_path())},
     )
 
 
@@ -1055,6 +1188,21 @@ def list_instances(
         result,
         rows=_instance_rows(result),
         columns=INSTANCE_COLUMNS,
+        json_list=True,
+        json_fields=(
+            "UHostId",
+            "Name",
+            "State",
+            "GpuType",
+            "GPU",
+            "CPU",
+            "Memory",
+            "Region",
+            "Zone",
+            "ChargeType",
+            "InstancePrice",
+        ),
+        metadata={"all": all_results},
     )
 
 
@@ -1092,10 +1240,22 @@ def show(
     ]
     if selected_sections:
         keys = {key for section in selected_sections for key in INSTANCE_SHOW_SECTION_KEYS[section]}
-        response_host = {key: value for key, value in host.items() if key in keys}
+        identity = {
+            "UHostId": host.get("UHostId") or instance,
+            "Name": host.get("Name"),
+            "Region": host.get("Region") or region,
+            "Zone": host.get("Zone") or zone,
+        }
+        response_host = {
+            **identity,
+            **{key: host.get(key, [] if key in INSTANCE_COLLECTION_KEYS else None) for key in keys},
+        }
         fields = _focused_instance_fields(host, selected_sections)
     else:
-        response_host = host
+        response_host = dict(host)
+        response_host.setdefault("UHostId", instance)
+        response_host.setdefault("Region", region)
+        response_host.setdefault("Zone", zone)
         fields = _default_instance_fields(host, region, zone)
     response = {"UHostSet": [response_host]}
     Renderer(state.json_output, state.show_sensitive).details(
@@ -1484,6 +1644,11 @@ def _render_batch(
         "succeeded": succeeded,
         "failed": failed,
     }
+    if failed:
+        payload["error"] = {
+            "code": "partial_failure",
+            "message": tr("Some instance operations failed."),
+        }
     rows = [
         {"UHostId": item["instance"], "Status": "Succeeded", "Message": ""} for item in succeeded
     ]
@@ -2029,6 +2194,7 @@ def refund(ctx: typer.Context, instances: List[str] = typer.Argument(...)) -> No
             ("RefundPrice", "REFUND"),
             ("Message", "MESSAGE"),
         ),
+        json_list=True,
     )
 
 
@@ -2171,6 +2337,135 @@ def set_schedule(
     invoke(state, "UpdateCompShareStopScheduler", params, success=tr("Scheduled shutdown"))
 
 
+def _scheduler_stop_time(host: Dict[str, Any]) -> Optional[int]:
+    value = host.get("SchedulerStopTime")
+    if value in {None, "", 0, "0"}:
+        return None
+    try:
+        stop_time = int(value)
+    except (TypeError, ValueError) as error:
+        raise UsageError(
+            tr("The API returned an invalid scheduled shutdown time: {value}.", value=value)
+        ) from error
+    return stop_time if stop_time > 0 else None
+
+
+def _schedule_payload(instance: str, stop_time: Optional[int]) -> Dict[str, Any]:
+    return {
+        "instance": instance,
+        "scheduled": stop_time is not None,
+        "scheduler_stop_time": stop_time,
+        "scheduler_stop_at": (
+            datetime.fromtimestamp(stop_time).astimezone().isoformat() if stop_time else None
+        ),
+    }
+
+
+@schedule_app.command("show", help="Show an instance scheduled shutdown.")
+def show_schedule(ctx: typer.Context, instance: str) -> None:
+    state = runtime(ctx)
+    _, _, host = locate_instance(state, instance)
+    stop_time = _scheduler_stop_time(host)
+    payload = _schedule_payload(instance, stop_time)
+    Renderer(state.json_output, state.show_sensitive).details(
+        "Shutdown schedule",
+        [
+            ("INSTANCE", instance),
+            ("STATUS", tr("Scheduled") if stop_time else tr("Not scheduled")),
+            ("SCHEDULER STOP TIME", stop_time),
+            ("UNIX", stop_time),
+        ],
+        response=payload,
+    )
+
+
+@schedule_app.command("extend", help="Extend an instance scheduled shutdown.")
+def extend_schedule(
+    ctx: typer.Context,
+    instance: str,
+    by: str = typer.Option(
+        ...,
+        "--by",
+        help="Positive duration to add to the current shutdown time, for example 2h.",
+    ),
+    project_id: Optional[str] = typer.Option(
+        None, "--project-id", help="Override the automatically detected project ID."
+    ),
+) -> None:
+    state = runtime(ctx)
+    region, zone, host = locate_instance(state, instance)
+    previous_stop_time = _scheduler_stop_time(host)
+    if previous_stop_time is None:
+        raise UsageError(
+            tr(
+                "Instance {instance} has no scheduled shutdown; use "
+                "`compshare instance schedule set`.",
+                instance=instance,
+            )
+        )
+    now = int(time.time())
+    if previous_stop_time <= now:
+        raise UsageError(
+            tr(
+                "The scheduled shutdown for {instance} has already expired; use "
+                "`compshare instance schedule set`.",
+                instance=instance,
+            )
+        )
+    seconds = duration_seconds(by)
+    stop_time = previous_stop_time + seconds
+    if stop_time < now + 300:
+        raise UsageError(tr("Scheduled shutdown must be at least five minutes from now."))
+
+    params = request(
+        ctx,
+        zone=True,
+        project_id=_project_id(state, project_id),
+        region_value=region,
+        zone_value=zone,
+    )
+    params.update({"UHostId": instance, "SchedulerStopTime": stop_time})
+    operation = call(state, "UpdateCompShareStopScheduler", params)
+
+    verified_stop_time: Optional[int] = None
+    for attempt in range(3):
+        if attempt:
+            time.sleep(0.2)
+        _, _, verified_host = locate_instance(state, instance, request_region=region)
+        verified_stop_time = _scheduler_stop_time(verified_host)
+        if verified_stop_time == stop_time:
+            break
+    if verified_stop_time != stop_time:
+        raise UsageError(
+            tr(
+                "Scheduled shutdown verification failed: expected {expected}, got {actual}.",
+                expected=stop_time,
+                actual=verified_stop_time,
+            )
+        )
+
+    payload = _schedule_payload(instance, verified_stop_time)
+    payload.update(
+        {
+            "previous_stop_time": previous_stop_time,
+            "extended_by": by,
+            "extended_by_seconds": seconds,
+            "operation": operation,
+        }
+    )
+    Renderer(state.json_output, state.show_sensitive).details(
+        "Extended scheduled shutdown",
+        [
+            ("INSTANCE", instance),
+            ("PREVIOUS STOP TIME", previous_stop_time),
+            ("EXTENDED BY", by),
+            ("SCHEDULER STOP TIME", verified_stop_time),
+            ("UNIX", verified_stop_time),
+        ],
+        response=payload,
+    )
+
+
 @schedule_app.command("cancel", help="Cancel an instance scheduled shutdown.")
 def cancel_schedule(
     ctx: typer.Context,
@@ -2204,6 +2499,339 @@ def list_software(
         list_key="SoftwarePort",
         columns=(("Software", "SOFTWARE"), ("Port", "PORT")),
     )
+
+
+@job_app.command("submit", help="Submit a durable remote job and return immediately.")
+def submit_job(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="Instance ID."),
+    remote_command: Optional[List[str]] = typer.Argument(
+        None,
+        help="Remote command and arguments; use -- before command options.",
+    ),
+    name: Optional[str] = typer.Option(None, "--name", help="Human-readable job name."),
+    cwd: Optional[str] = typer.Option(None, "--cwd", help="Remote working directory."),
+    job_id: Optional[str] = typer.Option(
+        None,
+        "--job-id",
+        help="Client-generated idempotency key; generated automatically when omitted.",
+    ),
+) -> None:
+    """Submit a command that survives local terminal and network disconnects."""
+    state = runtime(ctx)
+    selected_id = validate_job_id(job_id) if job_id else new_job_id()
+    command = joined_command(remote_command or [])
+    if not state.json_output:
+        typer.echo(tr("Submitting remote job {job_id}...", job_id=selected_id))
+    records = _remote_job_records(
+        state,
+        instance,
+        submit_script(selected_id, command, name=name, cwd=cwd),
+        job_id=selected_id,
+    )
+    job = _single_job_record(records, selected_id)
+    response = {"instance": instance, "job": job}
+    message = (
+        tr("Remote job {job_id} already exists", job_id=selected_id)
+        if job.get("Existing")
+        else tr("Submitted remote job {job_id}", job_id=selected_id)
+    )
+    Renderer(state.json_output, state.show_sensitive).details(
+        "Remote job",
+        [
+            ("JOB ID", job.get("JobId")),
+            ("NAME", job.get("Name")),
+            ("STATE", job.get("State")),
+            ("PID", job.get("PID")),
+            ("CREATED TIME", job.get("CreatedTime")),
+        ],
+        response=response,
+    )
+    if not state.json_output:
+        typer.echo(f"✓ {message}")
+
+
+@job_app.command("list", help="List durable remote jobs on an instance.")
+def list_jobs(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="Instance ID."),
+    job_state: Optional[str] = typer.Option(
+        None,
+        "--state",
+        help="Filter by job state.",
+    ),
+) -> None:
+    state = runtime(ctx)
+    requested_state: Optional[str] = None
+    if job_state:
+        requested_state = job_state.strip().casefold()
+        if requested_state not in {value.casefold() for value in JOB_STATES}:
+            raise UsageError(
+                tr(
+                    "--state must be one of: {states}.",
+                    states=", ".join(sorted(JOB_STATES)),
+                )
+            )
+    jobs = _remote_job_records(state, instance, list_script())
+    jobs.sort(key=lambda item: int(item.get("CreatedTime") or 0), reverse=True)
+    if requested_state:
+        jobs = [job for job in jobs if str(job.get("State", "")).casefold() == requested_state]
+    for job in jobs:
+        job.pop("Command", None)
+        job.pop("Existing", None)
+    response = {"instance": instance, "JobSet": jobs, "TotalCount": len(jobs)}
+    Renderer(state.json_output, state.show_sensitive).data(
+        response,
+        rows=jobs,
+        columns=JOB_COLUMNS,
+        json_list=True,
+        metadata={"instance": instance},
+    )
+
+
+@job_app.command("show", help="Show durable remote job status and metadata.")
+def show_job(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="Instance ID."),
+    job_id: str = typer.Argument(..., help="Remote job ID."),
+) -> None:
+    state = runtime(ctx)
+    selected_id = validate_job_id(job_id)
+    job = _single_job_record(
+        _remote_job_records(
+            state,
+            instance,
+            show_script(selected_id),
+            job_id=selected_id,
+        ),
+        selected_id,
+    )
+    Renderer(state.json_output, state.show_sensitive).details(
+        "Remote job",
+        [
+            ("JOB ID", job.get("JobId")),
+            ("NAME", job.get("Name")),
+            ("STATE", job.get("State")),
+            ("PID", job.get("PID")),
+            ("EXIT CODE", job.get("ExitCode")),
+            ("CREATED TIME", job.get("CreatedTime")),
+            ("STARTED TIME", job.get("StartedTime")),
+            ("FINISHED TIME", job.get("FinishedTime")),
+            ("CWD", job.get("Cwd")),
+            ("COMMAND", job.get("Command")),
+        ],
+        response={"instance": instance, "job": job},
+    )
+
+
+@job_app.command("logs", help="Read or follow durable remote job logs.")
+def job_logs(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="Instance ID."),
+    job_id: str = typer.Argument(..., help="Remote job ID."),
+    tail: int = typer.Option(200, "--tail", min=1, help="Number of trailing lines."),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Follow logs until completion."),
+    stream: str = typer.Option(
+        "all",
+        "--stream",
+        help="Log stream: all, stdout, or stderr.",
+    ),
+    stdout_offset: Optional[int] = typer.Option(
+        None,
+        "--stdout-offset",
+        min=0,
+        help="Read stdout from this byte offset instead of tailing lines.",
+    ),
+    stderr_offset: Optional[int] = typer.Option(
+        None,
+        "--stderr-offset",
+        min=0,
+        help="Read stderr from this byte offset instead of tailing lines.",
+    ),
+    limit: int = typer.Option(
+        65536,
+        "--limit",
+        min=1,
+        max=1048576,
+        help="Maximum bytes to read from each stream in offset mode.",
+    ),
+) -> None:
+    state = runtime(ctx)
+    selected_id = validate_job_id(job_id)
+    normalized_stream = stream.strip().casefold()
+    if normalized_stream not in {"all", "stdout", "stderr"}:
+        raise UsageError(tr("--stream must be all, stdout, or stderr."))
+    if follow:
+        if state.json_output:
+            raise UsageError(
+                tr("JSON mode does not support --follow; poll logs with byte offsets instead.")
+            )
+        raise typer.Exit(
+            _remote_job_stream(
+                state,
+                instance,
+                follow_script(selected_id, tail=tail, stream=normalized_stream),
+            )
+        )
+
+    offset_mode = stdout_offset is not None or stderr_offset is not None
+    log_record = _single_job_record(
+        _remote_job_records(
+            state,
+            instance,
+            logs_script(
+                selected_id,
+                tail=None if offset_mode else tail,
+                stdout_offset=stdout_offset,
+                stderr_offset=stderr_offset,
+                limit=limit,
+            ),
+            job_id=selected_id,
+        ),
+        selected_id,
+    )
+    if normalized_stream == "stdout":
+        for key in list(log_record):
+            if key.startswith("Stderr"):
+                log_record.pop(key)
+    elif normalized_stream == "stderr":
+        for key in list(log_record):
+            if key.startswith("Stdout"):
+                log_record.pop(key)
+
+    if state.json_output:
+        Renderer(True, state.show_sensitive).data(
+            {"instance": instance, "job_id": selected_id, "logs": log_record}
+        )
+        return
+    typer.echo(
+        tr(
+            "Remote job {job_id} logs ({state})",
+            job_id=selected_id,
+            state=log_record.get("State"),
+        )
+    )
+    if "Stdout" in log_record:
+        typer.echo("==> stdout <==")
+        typer.echo(str(log_record.get("Stdout") or ""), nl=True)
+    if "Stderr" in log_record:
+        typer.echo("==> stderr <==")
+        typer.echo(str(log_record.get("Stderr") or ""), nl=True)
+
+
+@job_app.command("wait", help="Wait for a durable remote job without cancelling on timeout.")
+def wait_job(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="Instance ID."),
+    job_id: str = typer.Argument(..., help="Remote job ID."),
+    timeout: int = typer.Option(300, "--timeout", min=1, help="Maximum wait time in seconds."),
+    interval: int = typer.Option(2, "--interval", min=1, help="Polling interval in seconds."),
+) -> None:
+    state = runtime(ctx)
+    selected_id = validate_job_id(job_id)
+    records = _remote_job_records(
+        state,
+        instance,
+        wait_script(selected_id, timeout=timeout, interval=interval),
+        job_id=selected_id,
+    )
+    job = _single_job_record(records, selected_id)
+    wait_status = records[1] if len(records) > 1 else {}
+    timed_out = bool(wait_status.get("WaitTimedOut"))
+    job["WaitTimedOut"] = timed_out
+    Renderer(state.json_output, state.show_sensitive).details(
+        "Remote job",
+        [
+            ("JOB ID", job.get("JobId")),
+            ("STATE", job.get("State")),
+            ("EXIT CODE", job.get("ExitCode")),
+            ("FINISHED TIME", job.get("FinishedTime")),
+            ("WAIT TIMED OUT", timed_out),
+        ],
+        response={"instance": instance, "job": job},
+    )
+    if timed_out:
+        raise typer.Exit(124)
+    if job.get("State") == "Succeeded":
+        return
+    exit_code = job.get("ExitCode")
+    raise typer.Exit(int(exit_code) if isinstance(exit_code, int) and exit_code else 1)
+
+
+@job_app.command("cancel", help="Cancel a running durable remote job.")
+def cancel_job(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="Instance ID."),
+    job_id: str = typer.Argument(..., help="Remote job ID."),
+    force: bool = typer.Option(False, "--force", help="Kill the remote process group immediately."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+) -> None:
+    state = runtime(ctx)
+    selected_id = validate_job_id(job_id)
+    confirm(
+        tr("Cancel remote job {job_id} on {instance}?", job_id=selected_id, instance=instance),
+        yes,
+    )
+    job = _single_job_record(
+        _remote_job_records(
+            state,
+            instance,
+            cancel_script(selected_id, force=force),
+            job_id=selected_id,
+        ),
+        selected_id,
+    )
+    Renderer(state.json_output, state.show_sensitive).success(
+        tr("Cancellation requested for remote job {job_id}", job_id=selected_id),
+        {"instance": instance, "job": job},
+    )
+
+
+@job_app.command("prune", help="Remove old terminal remote job records and logs.")
+def prune_jobs(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="Instance ID."),
+    older_than: str = typer.Option(
+        "7d",
+        "--older-than",
+        help="Minimum terminal job age, for example 12h or 7d.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="List jobs without removing them."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+) -> None:
+    state = runtime(ctx)
+    seconds = duration_seconds(older_than)
+    if not dry_run:
+        confirm(
+            tr(
+                "Remove terminal remote jobs older than {duration} from {instance}?",
+                duration=older_than,
+                instance=instance,
+            ),
+            yes,
+        )
+    jobs = _remote_job_records(
+        state,
+        instance,
+        prune_script(older_than=seconds, delete=not dry_run),
+    )
+    response = {
+        "instance": instance,
+        "dry_run": dry_run,
+        "JobSet": jobs,
+        "TotalCount": len(jobs),
+    }
+    if state.json_output or dry_run:
+        Renderer(state.json_output, state.show_sensitive).data(
+            response,
+            rows=jobs,
+            columns=JOB_COLUMNS,
+        )
+    else:
+        Renderer(False, state.show_sensitive).success(
+            tr("Removed {count} remote jobs", count=len(jobs)),
+            response,
+        )
 
 
 @app.command("ssh", help="Open or print an instance SSH command.")

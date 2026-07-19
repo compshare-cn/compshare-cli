@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+## 0.3.4
+
+- 统一 JSON 顶层契约为 `ok/schema_version/data/meta/error`：错误提供稳定代码，列表使用精简的
+  `data.items` 和一致分页元数据，脱敏时返回字段路径；`--json --version` 与 `--json --help`
+  也输出 JSON。实例聚焦查询保留资源身份，并为缺失集合返回空数组。
+- `--json`、`--profile` 和 `--show-sensitive` 支持出现在常见的子命令参数位置；参数预解析
+  不会跨越 `--`，避免截取远程命令的同名参数。
+- `config list` 明确显示凭证来自配置文件、环境变量或混合来源；仅使用环境变量时不再把空的
+  `default` profile 显示为当前凭证。
+- 包版本改为由 `compshare_cli.__version__` 生成，并在发布前统一校验构建元数据、运行时版本、
+  README 和 Changelog。
+- 移除用途有限的 `--show-completion`，保留 `--install-completion` 自动安装命令补全。
+- 增加 `instance schedule show` 定时关机查询和 `instance schedule extend --by` 延期能力；
+  延期以原计划为基准，并在更新后重新查询验证。
+- 增加纯客户端的 `instance job` 持久化远程任务管理，支持提交、列表、详情、双路日志及字节
+  偏移、等待、取消和历史清理；任务使用远端 XDG state 目录，可在本地终端或网络断开后继续
+  运行。
+
 ## 0.3.3
 
 - 将语言设置从 `lang` 子命令调整为全局 `--lang zh|en` 选项，并将 `feedback` 在根命令
@@ -22,7 +42,7 @@
   列表按类型执行正确的全局分页。
 - 放宽镜像列表、网络检测、软件端口和模型查询中接口不需要的 Region/Zone 限制。
 - 修正团队账单排序字段/方向的接口值，并让欠费汇总沿用列表的时间范围。
-- 开放 Typer 内置的 Bash、Zsh、Fish 和 PowerShell 命令补全安装及脚本输出选项。
+- 开放 Typer 内置的 Bash、Zsh、Fish 和 PowerShell 命令补全安装选项。
 
 ## 0.3.2
 

@@ -14,6 +14,7 @@ from compshare_cli.i18n import tr
 from compshare_cli.location import locate_instance
 from compshare_cli.output import Renderer
 from compshare_cli.parsing import compact, read_base64, read_text, split_csv
+from compshare_cli.runtime import Runtime
 
 app = typer.Typer(help="Manage instance images.", no_args_is_help=True)
 
@@ -28,21 +29,78 @@ IMAGE_COLUMNS = (
     ("Tags", "TAGS"),
 )
 
-_ZONE_SCOPED_SOURCES = {"platform", "custom", "community", "published", "user"}
+_PLATFORM_IMAGE_TYPES = ("System", "App", "Game", "Other")
 
 
-def _require_image_location(
-    source: str,
+def _image_request(
+    ctx: typer.Context,
     region: Optional[str],
     zone: Optional[str],
-) -> Tuple[str, Optional[str]]:
-    if region is None:
-        raise UsageError(tr("--region is required for image source {source}.", source=source))
-    if source in _ZONE_SCOPED_SOURCES and zone is None:
-        raise UsageError(
-            tr("--region and --zone are required for image source {source}.", source=source)
+) -> Dict[str, Any]:
+    params = request(ctx, region_value=region)
+    if zone is not None:
+        params["Zone"] = zone
+    return params
+
+
+def _collect_platform_images(
+    state: Runtime,
+    params: Dict[str, Any],
+    *,
+    offset: int,
+    limit: Optional[int],
+) -> Dict[str, Any]:
+    """Apply global pagination to an API that paginates each image type independently."""
+    if params.get("ImageType"):
+        return collect_pages(
+            state,
+            "DescribeCompShareImages",
+            params,
+            "ImageSet",
+            offset=offset,
+            limit=limit,
         )
-    return region, zone
+
+    combined: Optional[Dict[str, Any]] = None
+    rows: List[Dict[str, Any]] = []
+    total_count = 0
+    pending_offset = offset
+    remaining = limit
+    for image_type in _PLATFORM_IMAGE_TYPES:
+        count_only = remaining == 0
+        response = collect_pages(
+            state,
+            "DescribeCompShareImages",
+            {**params, "ImageType": image_type},
+            "ImageSet",
+            offset=0 if count_only else pending_offset,
+            limit=1 if count_only else remaining,
+        )
+        if combined is None:
+            combined = dict(response)
+        total = response.get("TotalCount")
+        type_total = total if isinstance(total, int) else len(response.get("ImageSet") or [])
+        total_count += type_total
+        if count_only:
+            continue
+        if pending_offset >= type_total:
+            pending_offset -= type_total
+            continue
+        pending_offset = 0
+        page = list(response.get("ImageSet") or [])
+        if remaining is not None:
+            page = page[:remaining]
+            remaining -= len(page)
+        rows.extend(page)
+
+    result = combined or {}
+    result["ImageSet"] = rows
+    result["TotalCount"] = total_count
+    result["ReturnedCount"] = len(rows)
+    result["Offset"] = offset
+    if limit is not None:
+        result["Limit"] = limit
+    return result
 
 
 def _community_rows(response: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
@@ -108,6 +166,8 @@ def list_images(
     """List platform, custom, community, shared or published images."""
     source = source.lower()
     action, list_key, grouped = _source(source)
+    if source == "user" and user is None:
+        raise UsageError(tr("--user is required for image source user."))
     tags = split_csv(tag or [])
     if source == "platform" and len(tags) > 1:
         raise UsageError(tr("Platform image search supports only one --tag."))
@@ -166,20 +226,25 @@ def list_images(
                 options=", ".join(unsupported),
             )
         )
-    region, zone = _require_image_location(source, region, zone)
-    params = request(ctx, region_value=region)
+    params = _image_request(ctx, region, zone)
     params.update(filters)
-    if source in _ZONE_SCOPED_SOURCES:
-        params["Zone"] = zone
     state = runtime(ctx)
-    response = collect_pages(
-        state,
-        action,
-        params,
-        "CompshareImageGroup" if grouped else list_key,
-        offset=offset,
-        limit=None if all_results else limit,
-    )
+    if source == "platform":
+        response = _collect_platform_images(
+            state,
+            params,
+            offset=offset,
+            limit=None if all_results else limit,
+        )
+    else:
+        response = collect_pages(
+            state,
+            action,
+            params,
+            "CompshareImageGroup" if grouped else list_key,
+            offset=offset,
+            limit=None if all_results else limit,
+        )
     rows = _community_rows(response) if grouped else response.get(list_key) or []
     Renderer(state.json_output, state.show_sensitive).data(
         response,
@@ -200,11 +265,8 @@ def show(
     if source not in {"platform", "custom", "community", "shared", "published"}:
         raise UsageError(tr("Image source {source} cannot be queried by ID.", source=source))
     action, _, _ = _source(source)
-    region, zone = _require_image_location(source, region, zone)
-    params = request(ctx, region_value=region)
+    params = _image_request(ctx, region, zone)
     params["CompShareImageId"] = image
-    if source in _ZONE_SCOPED_SOURCES:
-        params["Zone"] = zone
     state = runtime(ctx)
     response = call(state, action, params)
     rows = (
@@ -308,9 +370,9 @@ def progress(
     ctx: typer.Context,
     image: str,
     region: str = typer.Option(..., "--region", help="Region for this request."),
-    zone: str = typer.Option(..., "--zone", help="Availability zone."),
+    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
 ) -> None:
-    params = request(ctx, zone=True, region_value=region, zone_value=zone)
+    params = _image_request(ctx, region, zone)
     params["CompShareImageId"] = image
     invoke(runtime(ctx), "GetCompShareImageCreateProgress", params)
 
@@ -342,7 +404,7 @@ def update(
         None, "--autostart/--no-autostart", help="Whether the image supports automatic startup."
     ),
     region: str = typer.Option(..., "--region", help="Region for this request."),
-    zone: str = typer.Option(..., "--zone", help="Availability zone."),
+    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
 ) -> None:
     values = compact(
         {
@@ -362,7 +424,7 @@ def update(
     )
     if not values:
         raise UsageError(tr("Specify at least one field to update."))
-    params = request(ctx, zone=True, region_value=region, zone_value=zone)
+    params = _image_request(ctx, region, zone)
     params.update({"CompShareImageId": image, **values})
     invoke(
         runtime(ctx),
@@ -377,11 +439,11 @@ def delete(
     ctx: typer.Context,
     image: str,
     region: str = typer.Option(..., "--region", help="Region for this request."),
-    zone: str = typer.Option(..., "--zone", help="Availability zone."),
+    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     confirm(tr("Permanently delete custom image {image}?", image=image), yes)
-    params = request(ctx, zone=True, region_value=region, zone_value=zone)
+    params = _image_request(ctx, region, zone)
     params["CompShareImageId"] = image
     invoke(
         runtime(ctx),
@@ -510,33 +572,33 @@ def publish(
     )
 
 
-@app.command("favorite", help="Add an image to favorites.")
+@app.command("favorite", help="Add a community image group to favorites.")
 def favorite(
     ctx: typer.Context,
-    image: str,
+    group: str,
 ) -> None:
     params = request(ctx)
-    params["CompShareImageId"] = image
+    params["GroupId"] = group
     invoke(
         runtime(ctx),
-        "AddFavoriteImage",
+        "CreateCompShareImageFavorite",
         params,
-        success=tr("Favorited image {image}", image=image),
+        success=tr("Favorited image group {group}", group=group),
     )
 
 
-@app.command("unfavorite", help="Remove an image from favorites.")
+@app.command("unfavorite", help="Remove a community image group from favorites.")
 def unfavorite(
     ctx: typer.Context,
-    image: str,
+    group: str,
 ) -> None:
     params = request(ctx)
-    params["CompShareImageId"] = image
+    params["GroupId"] = group
     invoke(
         runtime(ctx),
-        "RemoveFavoriteImage",
+        "DeleteCompShareImageFavorite",
         params,
-        success=tr("Unfavorited image {image}", image=image),
+        success=tr("Unfavorited image group {group}", group=group),
     )
 
 

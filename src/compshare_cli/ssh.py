@@ -98,14 +98,8 @@ def _scp_password_authentication(argv: List[str]) -> List[str]:
     ]
 
 
-def scp_upload_command(
-    ssh_argv: List[str],
-    local_path: str,
-    remote_path: str,
-    *,
-    recursive: bool = False,
-) -> List[str]:
-    """Convert an API-provided SSH login command into an SCP upload command."""
+def _scp_connection(ssh_argv: List[str]) -> tuple[List[str], str]:
+    """Extract SCP-compatible options and destination from an SSH login command."""
     if not ssh_argv or os.path.basename(ssh_argv[0]).casefold() not in {"ssh", "ssh.exe"}:
         raise ValueError("unsupported SSH executable")
 
@@ -147,9 +141,35 @@ def scp_upload_command(
         raise ValueError("SSH login command has no destination")
     if login and "@" not in destination:
         destination = f"{login}@{destination}"
+    return scp_options, destination
+
+
+def scp_upload_command(
+    ssh_argv: List[str],
+    local_path: str,
+    remote_path: str,
+    *,
+    recursive: bool = False,
+) -> List[str]:
+    """Convert an API-provided SSH login command into an SCP upload command."""
+    scp_options, destination = _scp_connection(ssh_argv)
     if recursive:
         scp_options.append("-r")
     return ["scp", *scp_options, local_path, f"{destination}:{remote_path}"]
+
+
+def scp_download_command(
+    ssh_argv: List[str],
+    remote_path: str,
+    local_path: str,
+    *,
+    recursive: bool = True,
+) -> List[str]:
+    """Convert an API-provided SSH login command into an SCP download command."""
+    scp_options, destination = _scp_connection(ssh_argv)
+    if recursive:
+        scp_options.append("-r")
+    return ["scp", *scp_options, f"{destination}:{remote_path}", local_path]
 
 
 def _askpass_executable() -> str:
@@ -240,13 +260,13 @@ def remote_execution_result(exit_code: int, stdout: str, stderr: str) -> RemoteE
 
 
 def copy_with_password(argv: List[str], password: str) -> int:
-    """Run an SCP upload using the API-provided password."""
+    """Run an SCP transfer using the API-provided password."""
     command = _scp_password_authentication(argv)
     return _run_with_askpass(command, password)
 
 
 def copy_captured_with_password(argv: List[str], password: str) -> RemoteExecutionResult:
-    """Run and capture an SCP upload without exposing its password."""
+    """Run and capture an SCP transfer without exposing its password."""
     command = _scp_password_authentication(argv)
     completed = _run_with_askpass(command, password, capture=True)
     assert isinstance(completed, subprocess.CompletedProcess)
@@ -254,7 +274,7 @@ def copy_captured_with_password(argv: List[str], password: str) -> RemoteExecuti
 
 
 def copy_captured(argv: List[str]) -> RemoteExecutionResult:
-    """Run and capture an SCP upload using non-interactive OpenSSH authentication."""
+    """Run and capture an SCP transfer using non-interactive OpenSSH authentication."""
     executable = os.path.basename(argv[0]).casefold()
     if executable not in {"scp", "scp.exe"}:
         raise PasswordAutomationUnavailable

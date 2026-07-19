@@ -426,6 +426,21 @@ def _billing_params(
     )
 
 
+def _order_sort(value: str) -> str:
+    normalized = value.strip().replace("-", "_").casefold()
+    aliases = {
+        "createtime": "create_time",
+        "orderstarttime": "order_start_time",
+        "orderendtime": "order_end_time",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in {"create_time", "order_start_time", "order_end_time"}:
+        raise UsageError(
+            tr("--sort must be create_time, order_start_time, or order_end_time.")
+        )
+    return normalized
+
+
 @billing_app.command("list", help="List a team member's orders.")
 def list_orders(
     ctx: typer.Context,
@@ -438,7 +453,7 @@ def list_orders(
     resource: Optional[List[str]] = typer.Option(
         None, "--resource", help="Resource ID; repeatable."
     ),
-    sort: str = typer.Option("CreateTime", "--sort", help="Order sort field."),
+    sort: str = typer.Option("create_time", "--sort", help="Order sort field."),
     ascending: bool = typer.Option(False, "--ascending", help="Sort in ascending order."),
     limit: int = typer.Option(25, min=1, max=100, help="Maximum number of results."),
     offset: int = typer.Option(0, min=0, help="Number of results to skip."),
@@ -452,8 +467,8 @@ def list_orders(
                 "ChargeTypes": split_csv(charge or []) or None,
                 "OrderStates": split_csv(status or []) or None,
                 "ResourceIds": split_csv(resource or []) or None,
-                "OrderBy": sort,
-                "OrderDir": "Asc" if ascending else "Desc",
+                "OrderBy": _order_sort(sort),
+                "OrderDir": "ASC" if ascending else "DESC",
             }
         )
     )
@@ -523,7 +538,7 @@ def unpaid(
     summary = call(
         state,
         "DescribeTeamMemberUnpaidOrderCount",
-        _params(ctx, {"TeamId": team, "VirtualCompanyId": member}),
+        params,
     )
     response = {"orders": orders, "summary": summary}
     if state.json_output:

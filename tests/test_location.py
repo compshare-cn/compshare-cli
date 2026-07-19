@@ -101,3 +101,50 @@ def test_supported_locations_accepts_null_list(monkeypatch) -> None:
     monkeypatch.setattr(location, "call", lambda *args, **kwargs: {"ZoneInfo": None})
 
     assert location.supported_locations(Runtime()) == []
+
+
+def test_locate_disk_uses_disk_inventory_for_attached_disk(monkeypatch) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append((action, params))
+        if action == "DescribeCompshareDisk":
+            return {
+                "DiskSet": [
+                    {
+                        "ResourceId": "udisk-1",
+                        "Zone": "cn-sh2-02",
+                        "MountInstance": "uhost-1",
+                    }
+                ]
+            }
+        return {"ZoneInfo": [{"Region": "cn-sh2", "Zone": "cn-sh2-02"}]}
+
+    monkeypatch.setattr(location, "call", fake_call)
+
+    region, zone, host, disk = location.locate_disk(Runtime(), "udisk-1")
+
+    assert (region, zone) == ("cn-sh2", "cn-sh2-02")
+    assert host == {"UHostId": "uhost-1", "Region": "cn-sh2", "Zone": "cn-sh2-02"}
+    assert disk["ResourceId"] == "udisk-1"
+    assert calls == [
+        ("DescribeCompshareDisk", {}),
+        ("DescribeCompShareSupportZone", {}),
+    ]
+
+
+def test_locate_disk_supports_detached_disk(monkeypatch) -> None:
+    def fake_call(state, action, params):
+        if action == "DescribeCompshareDisk":
+            return {
+                "DiskSet": [
+                    {"ResourceId": "udisk-1", "Zone": "cn-sh2-02", "MountInstance": ""}
+                ]
+            }
+        return {"ZoneInfo": [{"Region": "cn-sh2", "Zone": "cn-sh2-02"}]}
+
+    monkeypatch.setattr(location, "call", fake_call)
+
+    _, _, host, _ = location.locate_disk(Runtime(), "udisk-1")
+
+    assert host is None

@@ -60,26 +60,43 @@ def locate_disk(
     *,
     request_region: Optional[str] = None,
 ) -> Tuple[str, str, Optional[Dict[str, Any]], Dict[str, Any]]:
-    """Find an attached disk and use only the location reported for its instance."""
-    offset = 0
-    while True:
-        params: Dict[str, Any] = {"Limit": 100, "Offset": offset}
-        if request_region is not None:
-            params["Region"] = request_region
-        response = call(state, "DescribeCompShareInstance", params)
-        hosts = response.get("UHostSet") or []
-        for raw_host in hosts:
-            host = dict(raw_host)
-            for disk in host.get("DiskSet") or []:
-                if disk.get("UDiskId") == disk_id or disk.get("DiskId") == disk_id:
-                    region, zone = instance_location(host)
-                    return region, zone, host, disk
-        if len(hosts) < 100:
-            break
-        offset += 100
-    raise UsageError(
-        tr(
-            "Attached disk {disk} was not found; pass --region and --zone if it is detached.",
-            disk=disk_id,
-        )
+    """Find an attached or detached disk using the dedicated disk inventory API."""
+    params = {"Region": request_region} if request_region is not None else {}
+    response = call(state, "DescribeCompshareDisk", params)
+    disk = next(
+        (
+            dict(item)
+            for item in response.get("DiskSet") or []
+            if str(item.get("ResourceId") or "") == disk_id
+        ),
+        None,
     )
+    if disk is None:
+        raise UsageError(tr("Disk {disk} was not found.", disk=disk_id))
+
+    zone = str(disk.get("Zone") or "")
+    locations = supported_locations(state, request_region=request_region)
+    location = next(
+        (
+            item
+            for item in locations
+            if str(item.get("Zone") or "") == zone and item.get("Region")
+        ),
+        None,
+    )
+    if location is None:
+        raise UsageError(
+            tr(
+                "DescribeCompshareDisk did not return a known location for disk {disk}.",
+                disk=disk_id,
+            )
+        )
+
+    region = str(location["Region"])
+    mount_instance = disk.get("MountInstance")
+    host = (
+        {"UHostId": str(mount_instance), "Region": region, "Zone": zone}
+        if mount_instance
+        else None
+    )
+    return region, zone, host, disk

@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 from compshare_cli import __version__, cli
 from compshare_cli.commands import doctor as doctor_module
 from compshare_cli.commands import image as image_module
-from compshare_cli.commands import instance, team
+from compshare_cli.commands import instance, storage, team
 from compshare_cli.config import ConfigStore, Profile
 from compshare_cli.i18n import localize_command
 from compshare_cli.ssh import RemoteExecutionResult
@@ -70,7 +70,30 @@ def test_root_help_lists_config_first(capsys) -> None:
     cli.main(["-h"])
     help_text = capsys.readouterr().out
     assert "--version" in help_text
-    assert help_text.index("config") < help_text.index("lang")
+    assert "--lang" in help_text
+    assert "│ lang " not in help_text
+    assert help_text.index("config") < help_text.index("feedback") < help_text.index("doctor")
+
+
+def test_shell_completion_is_available(monkeypatch) -> None:
+    monkeypatch.setattr("typer.completion._get_shell_name", lambda: "zsh")
+
+    shown = runner.invoke(cli.app, ["--show-completion"], prog_name="compshare")
+    assert shown.exit_code == 0, shown.output
+    assert "#compdef compshare" in shown.stdout
+    assert "_COMPSHARE_COMPLETE=complete_zsh" in shown.stdout
+
+    completed = runner.invoke(
+        cli.app,
+        [],
+        prog_name="compshare",
+        env={
+            "_COMPSHARE_COMPLETE": "complete_zsh",
+            "_TYPER_COMPLETE_ARGS": "compshare instance sh",
+        },
+    )
+    assert completed.exit_code == 0, completed.output
+    assert '"show"' in completed.stdout
 
 
 def test_global_options_after_command_are_rejected(capsys) -> None:
@@ -117,8 +140,8 @@ def test_credential_configuration_does_not_include_resource_scope() -> None:
     assert "--zone" not in config_help.stdout
     assert "--project-id" not in config_help.stdout
     assert "--project-id" in schedule_help.stdout
-    assert "--install-completion" not in root_help.stdout
-    assert "--show-completion" not in root_help.stdout
+    assert "--install-completion" in root_help.stdout
+    assert "--show-completion" in root_help.stdout
     assert "--region" not in root_help.stdout
     assert "--zone" not in root_help.stdout
     assert "--show-sensitive" in root_help.stdout
@@ -180,7 +203,7 @@ def test_json_confirmation_requires_yes_without_prompt(monkeypatch, tmp_path, ca
     assert "work" in ConfigStore().list_profiles()
 
 
-def test_lang_command_persists_help_language(monkeypatch, tmp_path, capsys) -> None:
+def test_lang_option_persists_help_language(monkeypatch, tmp_path, capsys) -> None:
     config_file = tmp_path / "config.json"
     monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(config_file))
     monkeypatch.delenv("COMPSHARE_LANG", raising=False)
@@ -190,12 +213,13 @@ def test_lang_command_persists_help_language(monkeypatch, tmp_path, capsys) -> N
     assert "在终端管理优云智算 GPU 计算资源" in chinese
     assert "管理 GPU 实例" in chinese
     assert "显示帮助并退出" in chinese
-    assert "--install-completion" not in chinese
-    assert "--lang" not in chinese
+    assert "--install-completion" in chinese
+    assert "为当前 Shell 安装命令补全" in chinese
+    assert "--lang" in chinese
 
-    cli.main(["lang", "en"])
+    cli.main(["--lang", "en", "--help"])
     changed = capsys.readouterr().out
-    assert "Default help language set to English" in changed
+    assert "Manage CompShare GPU compute from the terminal" in changed
     assert json.loads(config_file.read_text(encoding="utf-8"))["language"] == "en"
 
     cli.main(["instance", "--help"])
@@ -203,28 +227,18 @@ def test_lang_command_persists_help_language(monkeypatch, tmp_path, capsys) -> N
     assert "Manage GPU instances" in english
     assert "Show this message and exit" in english
 
-    cli.main(["lang", "zh"])
-    assert "默认帮助语言已切换为中文" in capsys.readouterr().out
+    cli.main(["--lang=zh", "--help"])
+    assert "在终端管理优云智算 GPU 计算资源" in capsys.readouterr().out
     cli.main(["--help"])
     assert "在终端管理优云智算 GPU 计算资源" in capsys.readouterr().out
 
 
-def test_lang_command_shows_current_language_as_json(monkeypatch, tmp_path, capsys) -> None:
+def test_lang_option_applies_to_command_and_json_output(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(tmp_path / "config.json"))
     monkeypatch.delenv("COMPSHARE_LANG", raising=False)
-    cli.main(["--json", "lang", "en"])
-    assert json.loads(capsys.readouterr().out) == {"ok": True, "language": "en"}
-
-    cli.main(["--json", "lang"])
-    assert json.loads(capsys.readouterr().out) == {"language": "en"}
-
-
-def test_lang_is_not_a_global_option(monkeypatch, tmp_path, capsys) -> None:
-    monkeypatch.setenv("COMPSHARE_CONFIG_FILE", str(tmp_path / "config.json"))
-    with pytest.raises(SystemExit) as raised:
-        cli.main(["--lang", "en"])
-    assert raised.value.code == 2
-    assert "No such option: --lang" in capsys.readouterr().err
+    cli.main(["--lang", "en", "--json", "version"])
+    assert json.loads(capsys.readouterr().out) == {"version": __version__}
+    assert ConfigStore().load_language() == "en"
 
 
 def test_help_language_can_come_from_environment(monkeypatch, capsys) -> None:
@@ -233,14 +247,18 @@ def test_help_language_can_come_from_environment(monkeypatch, capsys) -> None:
     assert "Manage instance images" in capsys.readouterr().out
 
 
-def test_zone_scoped_image_source_requires_explicit_location(capsys) -> None:
-    with pytest.raises(SystemExit) as raised:
-        cli.main(["--json", "image", "list", "--source", "custom", "--region", "cn-sh2"])
+def test_image_list_does_not_require_location(monkeypatch) -> None:
+    calls = []
 
-    assert raised.value.code == 2
-    error = json.loads(capsys.readouterr().out)["error"]
-    assert "--region" in error
-    assert "--zone" in error
+    def fake_pages(state, action, params, list_key, **kwargs):
+        calls.append((action, params, list_key))
+        return {"ImageSet": []}
+
+    monkeypatch.setattr(image_module, "collect_pages", fake_pages)
+    result = runner.invoke(cli.app, ["--json", "image", "list", "--source", "custom"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [("DescribeCompShareCustomImages", {}, "ImageSet")]
 
 
 def test_custom_image_list_passes_explicit_region_and_zone(monkeypatch) -> None:
@@ -276,7 +294,47 @@ def test_custom_image_list_passes_explicit_region_and_zone(monkeypatch) -> None:
     ]
 
 
-def test_global_favorite_does_not_send_region(monkeypatch) -> None:
+def test_storage_disk_list_uses_disk_inventory_and_resource_id(monkeypatch) -> None:
+    calls = []
+
+    def fake_call(state, action, params):
+        calls.append((action, params))
+        return {
+            "TotalCount": 1,
+            "DiskSet": [
+                {
+                    "ResourceId": "udisk-abcdefghijklmnop",
+                    "Name": "data",
+                    "Configuration": "100GB",
+                    "DiskType": "CLOUD_SSD",
+                    "Zone": "cn-sh2-02",
+                    "MountInstance": "uhost-1",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(storage, "call", fake_call)
+    result = runner.invoke(
+        cli.app,
+        [
+            "storage",
+            "disk",
+            "list",
+            "--instance",
+            "uhost-1",
+            "--region",
+            "cn-sh2",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        ("DescribeCompshareDisk", {"HostId": "uhost-1", "Region": "cn-sh2"})
+    ]
+    assert "udisk-abcdefghijklmnop" in result.stdout
+
+
+def test_favorite_uses_image_group_api(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(
         image_module,
@@ -284,10 +342,121 @@ def test_global_favorite_does_not_send_region(monkeypatch) -> None:
         lambda state, action, params, **kwargs: calls.append((action, params)),
     )
 
-    result = runner.invoke(cli.app, ["image", "favorite", "image-1"])
+    result = runner.invoke(cli.app, ["image", "favorite", "group-1"])
 
     assert result.exit_code == 0, result.output
-    assert calls == [("AddFavoriteImage", {"CompShareImageId": "image-1"})]
+    assert calls == [("CreateCompShareImageFavorite", {"GroupId": "group-1"})]
+
+
+def test_unfavorite_uses_image_group_api(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        image_module,
+        "invoke",
+        lambda state, action, params, **kwargs: calls.append((action, params)),
+    )
+
+    result = runner.invoke(cli.app, ["image", "unfavorite", "group-1"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [("DeleteCompShareImageFavorite", {"GroupId": "group-1"})]
+
+
+def test_platform_image_list_applies_global_limit_across_types(monkeypatch) -> None:
+    calls = []
+
+    def fake_pages(state, action, params, list_key, **kwargs):
+        image_type = params["ImageType"]
+        calls.append(image_type)
+        available = [
+            {"CompShareImageId": f"{image_type}-{index}", "ImageType": image_type}
+            for index in range(2)
+        ]
+        offset = kwargs.get("offset", 0)
+        limit = kwargs.get("limit")
+        selected = available[offset:] if limit is None else available[offset : offset + limit]
+        return {
+            "ImageSet": selected,
+            "TotalCount": 2,
+        }
+
+    monkeypatch.setattr(image_module, "collect_pages", fake_pages)
+    result = runner.invoke(
+        cli.app,
+        ["--json", "image", "list", "--source", "platform", "--offset", "1", "--limit", "3"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert calls == ["System", "App", "Game", "Other"]
+    assert payload["TotalCount"] == 8
+    assert payload["ReturnedCount"] == 3
+    assert [item["CompShareImageId"] for item in payload["ImageSet"]] == [
+        "System-1",
+        "App-0",
+        "App-1",
+    ]
+
+
+def test_user_image_source_requires_user_id() -> None:
+    result = runner.invoke(cli.app, ["--json", "image", "list", "--source", "user"])
+
+    assert result.exit_code != 0
+    assert "--user" in str(result.exception)
+
+
+def test_read_only_instance_metadata_commands_relax_location(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        instance,
+        "invoke",
+        lambda state, action, params, **kwargs: calls.append((action, params)),
+    )
+
+    assert runner.invoke(cli.app, ["instance", "network"]).exit_code == 0
+    assert runner.invoke(cli.app, ["instance", "software", "list"]).exit_code == 0
+    assert runner.invoke(cli.app, ["instance", "ports", "list"]).exit_code == 0
+    assert runner.invoke(cli.app, ["instance", "models", "--region", "cn-sh2"]).exit_code == 0
+
+    assert calls == [
+        ("CheckCompShareNetOptimizer", {}),
+        ("DescribeCompShareSoftwarePort", {}),
+        ("DescribeCompShareSoftwarePort", {}),
+        ("DescribeModelRepositoryModels", {"Region": "cn-sh2"}),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("args", "action"),
+    [
+        (
+            ["image", "progress", "image-1", "--region", "cn-sh2"],
+            "GetCompShareImageCreateProgress",
+        ),
+        (
+            ["image", "update", "image-1", "--name", "new", "--region", "cn-sh2"],
+            "UpdateCompShareImage",
+        ),
+        (
+            ["image", "delete", "image-1", "--region", "cn-sh2", "--yes"],
+            "TerminateCompShareCustomImage",
+        ),
+    ],
+)
+def test_image_mutation_metadata_commands_do_not_require_zone(monkeypatch, args, action) -> None:
+    calls = []
+    monkeypatch.setattr(
+        image_module,
+        "invoke",
+        lambda state, current_action, params, **kwargs: calls.append((current_action, params)),
+    )
+
+    result = runner.invoke(cli.app, args)
+
+    assert result.exit_code == 0, result.output
+    assert calls[0][0] == action
+    assert calls[0][1]["Region"] == "cn-sh2"
+    assert "Zone" not in calls[0][1]
 
 
 def test_every_command_has_chinese_and_english_description() -> None:
@@ -1550,6 +1719,97 @@ def test_scp_uploads_directory_recursively(monkeypatch, tmp_path) -> None:
     ]
 
 
+def test_cp_upload_accepts_explicit_remote_path_marker(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "model.bin"
+    source.write_bytes(b"model")
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-wlcb",
+            "cn-wlcb-01",
+            {
+                "UHostId": value,
+                "SshLoginCommand": "ssh root@example.invalid",
+                "Password": "instance-secret",
+            },
+        ),
+    )
+    copies = []
+    monkeypatch.setattr(
+        instance,
+        "copy_with_password",
+        lambda argv, password: copies.append(argv) or 0,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["instance", "cp", "uhost-1", str(source), ":/workspace/model.bin"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert copies == [["scp", str(source.resolve()), "root@example.invalid:/workspace/model.bin"]]
+
+
+def test_cp_downloads_remote_file_or_directory_recursively(monkeypatch, tmp_path) -> None:
+    destination = tmp_path / "results"
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (
+            "cn-wlcb",
+            "cn-wlcb-01",
+            {
+                "UHostId": value,
+                "SshLoginCommand": "ssh root@example.invalid -p 2222",
+                "Password": "instance-secret",
+            },
+        ),
+    )
+    copies = []
+    monkeypatch.setattr(
+        instance,
+        "copy_with_password",
+        lambda argv, password: copies.append((argv, password)) or 0,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["instance", "cp", "uhost-1", ":/workspace/results", str(destination)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert copies == [
+        (
+            [
+                "scp",
+                "-P",
+                "2222",
+                "-r",
+                "root@example.invalid:/workspace/results",
+                str(destination.absolute()),
+            ],
+            "instance-secret",
+        )
+    ]
+
+
+def test_cp_rejects_two_remote_paths_before_querying_instance(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda state, value: (_ for _ in ()).throw(AssertionError("should not query instance")),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["instance", "cp", "uhost-1", ":/workspace/source", ":/workspace/target"],
+    )
+
+    assert result.exit_code != 0
+    assert "不能同时位于实例" in str(result.exception)
+
+
 def test_scp_rejects_missing_local_path(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         instance,
@@ -1970,26 +2230,70 @@ def test_team_quota_reports_partial_failure(monkeypatch) -> None:
     assert payload["FailedMembers"]["60002"]["Code"] == 17001
 
 
-def test_team_unpaid_combines_orders_and_summary(monkeypatch) -> None:
-    monkeypatch.setattr(
-        team,
-        "collect_pages",
-        lambda *args, **kwargs: {"OrderInfos": [{"OrderNo": "order-1"}]},
-    )
-    monkeypatch.setattr(
-        team,
-        "call",
-        lambda state, action, params: {"TotalCount": 1, "Amount": "50.00"},
-    )
+def test_team_billing_uses_api_sort_values(monkeypatch) -> None:
+    calls = []
+
+    def fake_pages(state, action, params, list_key, **kwargs):
+        calls.append((action, params))
+        return {"OrderInfos": []}
+
+    monkeypatch.setattr(team, "collect_pages", fake_pages)
     result = runner.invoke(
         cli.app,
-        ["--json", "team", "billing", "unpaid", "1001", "60001"],
+        [
+            "--json",
+            "team",
+            "billing",
+            "list",
+            "1001",
+            "60001",
+            "--sort",
+            "order-start-time",
+            "--ascending",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0][0] == "DescribeTeamMemberOrder"
+    assert calls[0][1]["OrderBy"] == "order_start_time"
+    assert calls[0][1]["OrderDir"] == "ASC"
+
+
+def test_team_unpaid_combines_orders_and_summary(monkeypatch) -> None:
+    calls = []
+
+    def fake_pages(state, action, params, list_key, **kwargs):
+        calls.append((action, dict(params)))
+        return {"OrderInfos": [{"OrderNo": "order-1"}]}
+
+    def fake_call(state, action, params):
+        calls.append((action, dict(params)))
+        return {"TotalCount": 1, "Amount": "50.00"}
+
+    monkeypatch.setattr(team, "collect_pages", fake_pages)
+    monkeypatch.setattr(team, "call", fake_call)
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "team",
+            "billing",
+            "unpaid",
+            "1001",
+            "60001",
+            "--start",
+            "2026-07-01T00:00:00+08:00",
+            "--end",
+            "2026-07-02T00:00:00+08:00",
+        ],
     )
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["orders"]["OrderInfos"][0]["OrderNo"] == "order-1"
     assert payload["summary"]["Amount"] == "50.00"
+    assert calls[0][1] == calls[1][1]
+    assert {"BeginTime", "EndTime"} <= calls[1][1].keys()
 
 
 def test_team_export_writes_csv(monkeypatch, tmp_path) -> None:

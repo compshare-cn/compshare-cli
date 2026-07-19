@@ -232,6 +232,23 @@ def test_scp_upload_command_preserves_shared_options_and_login() -> None:
     ]
 
 
+def test_scp_download_command_preserves_connection_and_recurses() -> None:
+    command = ssh.scp_download_command(
+        ["ssh", "-p2222", "-lroot", "example.invalid"],
+        "/workspace/results",
+        "/local/results",
+    )
+
+    assert command == [
+        "scp",
+        "-P",
+        "2222",
+        "-r",
+        "root@example.invalid:/workspace/results",
+        "/local/results",
+    ]
+
+
 def test_copy_with_password_adds_scp_authentication_options(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(

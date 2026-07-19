@@ -120,6 +120,7 @@ def test_event_worker_posts_to_event_endpoint(monkeypatch) -> None:
     [
         (["version"], "version"),
         (["--json", "instance", "list", "--all"], "instance.list"),
+        (["--lang", "en", "instance", "list", "--all"], "instance.list"),
         (
             [
                 "--profile",

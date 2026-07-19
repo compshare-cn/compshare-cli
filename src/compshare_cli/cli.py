@@ -30,9 +30,11 @@ _ABORT_EXCEPTIONS = (click.Abort, _TYPER_CLICK_EXCEPTIONS.Abort)
 class RootGroup(typer_core.TyperGroup):
     def list_commands(self, ctx):
         names = super().list_commands(ctx)
-        if "config" not in names:
-            return names
-        return ["config", *(name for name in names if name != "config")]
+        preferred = ("config", "feedback", "doctor")
+        return [
+            *(name for name in preferred if name in names),
+            *(name for name in names if name not in preferred),
+        ]
 
 
 app = typer.Typer(
@@ -40,7 +42,7 @@ app = typer.Typer(
     help="Manage CompShare GPU compute from the terminal.",
     cls=RootGroup,
     no_args_is_help=True,
-    add_completion=False,
+    add_completion=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 app.add_typer(instance.app, name="instance")
@@ -61,6 +63,12 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _language_callback(value: Optional[str]) -> Optional[str]:
+    if value is not None:
+        ConfigStore().save_language(normalize_language(value))
+    return value
+
+
 @app.callback()
 def root(
     ctx: typer.Context,
@@ -69,6 +77,14 @@ def root(
         "--profile",
         metavar="NAME",
         help="Credential profile.",
+    ),
+    language: Optional[str] = typer.Option(
+        None,
+        "--lang",
+        metavar="LANG",
+        callback=_language_callback,
+        is_eager=True,
+        help="Language: zh or en.",
     ),
     json_output: bool = typer.Option(
         False,
@@ -224,34 +240,6 @@ def version(ctx: typer.Context) -> None:
         typer.echo(__version__)
 
 
-@app.command("lang")
-def lang(
-    ctx: typer.Context,
-    language: Optional[str] = typer.Argument(None, help="Language: zh or en."),
-) -> None:
-    """Set or show the default help language."""
-    state = ctx.find_root().obj
-    renderer = Renderer(state.json_output, state.show_sensitive)
-    if language is None:
-        current = configured_language()
-        message = (
-            f"当前默认帮助语言：{current}"
-            if current == "zh"
-            else f"Default help language: {current}"
-        )
-        renderer.success(message, {"language": current})
-        return
-
-    selected = normalize_language(language)
-    ConfigStore().save_language(selected)
-    message = (
-        "默认帮助语言已切换为中文（zh）"
-        if selected == "zh"
-        else "Default help language set to English (en)"
-    )
-    renderer.success(message, {"ok": True, "language": selected})
-
-
 @app.command("doctor")
 def doctor(ctx: typer.Context) -> None:
     """Diagnose the CLI configuration and environment."""
@@ -288,9 +276,12 @@ def _command_path(command: click.Command, argv: List[str]) -> Optional[str]:
     remaining = list(argv)
     while remaining and remaining[0].startswith("-"):
         option = remaining.pop(0)
-        if option == "--profile" and remaining:
+        if option in {"--profile", "--lang"} and remaining:
             remaining.pop(0)
-        elif option.startswith("--profile=") or option in {"--json", "--show-sensitive"}:
+        elif option.startswith(("--profile=", "--lang=")) or option in {
+            "--json",
+            "--show-sensitive",
+        }:
             continue
         else:
             return None
@@ -307,6 +298,40 @@ def _command_path(command: click.Command, argv: List[str]) -> Optional[str]:
     return ".".join(path) or None
 
 
+def _requested_language(argv: List[str]) -> Optional[str]:
+    """Return the last root --lang value before the command, if present."""
+    requested: Optional[str] = None
+    index = 0
+    while index < len(argv):
+        option = argv[index]
+        if option == "--lang":
+            if index + 1 >= len(argv) or argv[index + 1].startswith("-"):
+                return requested
+            requested = argv[index + 1]
+            index += 2
+            continue
+        if option.startswith("--lang="):
+            requested = option.split("=", 1)[1]
+            index += 1
+            continue
+        if option == "--profile":
+            index += 2
+            continue
+        if option.startswith("--profile=") or option in {
+            "--json",
+            "--show-sensitive",
+            "--version",
+            "-h",
+            "--help",
+        }:
+            index += 1
+            continue
+        if not option.startswith("-"):
+            break
+        index += 1
+    return requested
+
+
 def main(args: Optional[List[str]] = None) -> None:
     original_argv = list(sys.argv[1:] if args is None else args)
     argv = list(original_argv)
@@ -315,7 +340,12 @@ def main(args: Optional[List[str]] = None) -> None:
     telemetry_command: Optional[str] = None
     show_sensitive = "--show-sensitive" in argv
     try:
-        language = configured_language()
+        requested_language = _requested_language(argv)
+        if requested_language is None:
+            language = configured_language()
+        else:
+            language = normalize_language(requested_language)
+            ConfigStore().save_language(language)
         command = localize_command(get_command(app), language)
         telemetry_command = _command_path(command, original_argv)
         result = command.main(args=argv, prog_name="compshare", standalone_mode=False)

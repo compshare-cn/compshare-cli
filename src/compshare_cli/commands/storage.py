@@ -20,14 +20,8 @@ app.add_typer(us3_app, name="us3")
 
 
 def _disk_rows(response: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
-    for instance in response.get("UHostSet") or []:
-        for disk in instance.get("DiskSet") or []:
-            row = dict(disk)
-            row["UHostId"] = instance.get("UHostId")
-            row["Region"] = instance.get("Region")
-            size = row.get("Size")
-            row["SizeDisplay"] = f"{size}GiB" if isinstance(size, int) else size
-            yield row
+    for disk in response.get("DiskSet") or []:
+        yield dict(disk)
 
 
 @disk_app.command("list")
@@ -36,40 +30,21 @@ def list_disks(
     instance: Optional[str] = typer.Option(None, "--instance", help="Filter by instance ID."),
     region: Optional[str] = typer.Option(None, "--region", help="Filter by region."),
 ) -> None:
-    """List disks reported by one or all instances."""
+    """List attached and detached disks from the disk inventory."""
     state = runtime(ctx)
-    if instance:
-        resolved_region, _, host = locate_instance(
-            state,
-            instance,
-            request_region=region,
-        )
-        response: Dict[str, Any] = {
-            "UHostSet": [host],
-            "RegionSet": [resolved_region],
-        }
-    else:
-        params: Dict[str, Any] = {"Limit": 100, "Offset": 0}
-        if region is not None:
-            params["Region"] = region
-        response = call(state, "DescribeCompShareInstance", params)
-        response["RegionSet"] = list(
-            dict.fromkeys(
-                str(host["Region"]) for host in response.get("UHostSet") or [] if host.get("Region")
-            )
-        )
+    params = compact({"HostId": instance, "Region": region})
+    response = call(state, "DescribeCompshareDisk", params)
     Renderer(state.json_output, state.show_sensitive).data(
         response,
         rows=_disk_rows(response),
         columns=(
-            ("UDiskId", "DISK ID"),
+            ("ResourceId", "DISK ID"),
             ("Name", "NAME"),
-            ("SizeDisplay", "SIZE"),
-            ("Type", "TYPE"),
-            ("IsBoot", "BOOT"),
-            ("Device", "DEVICE"),
-            ("UHostId", "INSTANCE"),
-            ("Region", "REGION"),
+            ("Configuration", "SIZE"),
+            ("DiskType", "TYPE"),
+            ("Status", "STATUS"),
+            ("MountInstance", "INSTANCE"),
+            ("Zone", "ZONE"),
         ),
     )
 

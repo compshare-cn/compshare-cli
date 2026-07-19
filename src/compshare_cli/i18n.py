@@ -26,8 +26,11 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Availability zone for this request; not part of the credential profile.": (
         "本次请求的可用区，不属于凭证配置。"
     ),
-    "Set or show the default help language.": "设置或查看默认帮助语言。",
     "Language: zh or en.": "语言：zh 或 en。",
+    "Install completion for the current shell.": "为当前 Shell 安装命令补全。",
+    "Show completion for the current shell, to copy it or customize the installation.": (
+        "显示当前 Shell 的命令补全脚本，便于复制或自定义安装。"
+    ),
     "Save a CompShare API credential profile.": "保存优云智算 API 凭证配置。",
     "Print the CLI version.": "显示 CLI 版本。",
     "Print the CLI version and exit.": "显示 CLI 版本并退出。",
@@ -125,9 +128,11 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Remote command and arguments; use -- before command options.": (
         "要在实例中执行的命令及参数；命令包含选项时请先使用 -- 分隔。"
     ),
-    "Copy a local file or directory to an instance.": "将本地文件或目录复制到实例。",
-    "Local file or directory.": "本地文件或目录。",
-    "Destination path on the instance.": "实例内的目标路径。",
+    "Copy files or directories between local machine and an instance.": (
+        "在本地与实例之间双向复制文件或目录。"
+    ),
+    "Source path. Prefix instance paths with :.": "源路径；实例路径需要以 : 开头。",
+    "Destination path. Prefix instance paths with :.": "目标路径；实例路径需要以 : 开头。",
     "Print instead of copying.": "只显示 SCP 命令，不执行复制。",
     "Open or print an instance SSH command.": "连接实例 SSH，或仅显示 SSH 命令。",
     "Manage container port mappings.": "管理容器端口映射。",
@@ -164,6 +169,7 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "List available image tags.": "列出可用的镜像标签。",
     "Manage disks and cloud storage.": "管理磁盘和云存储。",
     "Manage instance disks.": "管理实例云盘。",
+    "List attached and detached disks from the disk inventory.": "列出已挂载和未挂载的云盘。",
     "List disks reported by one or all instances.": "列出一个或全部实例的磁盘。",
     "Create a disk and attach it to an instance.": "创建云盘并挂载到实例。",
     "Disk size, for example 100GiB.": "磁盘大小，例如 100GiB。",
@@ -280,6 +286,9 @@ ZH_TRANSLATIONS: Dict[str, str] = {
         "时间必须是 Unix 时间戳、ISO 8601 时间，或 30m、2h 这样的相对时间。"
     ),
     "Unable to read file {path}: {error}": "无法读取文件 {path}：{error}",
+    "Both source and destination cannot be instance paths.": "源路径和目标路径不能同时位于实例。",
+    "Local destination parent {path} does not exist.": "本地目标路径的父目录 {path} 不存在。",
+    "Remote path cannot be empty.": "实例路径不能为空。",
     "Wait for the operation to reach a stable state.": "等待操作进入稳定状态。",
     "Maximum wait time in seconds.": "最长等待时间（秒）。",
     "Validate and show the request without changing resources.": "仅校验并显示请求，不变更资源。",
@@ -422,8 +431,12 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "--source must be platform, custom, community, shared, published, or user.": (
         "--source 必须是 platform、custom、community、shared、published 或 user。"
     ),
+    "--user is required for image source user.": "镜像来源为 user 时必须指定 --user。",
     "--without-gpu cannot be combined with --cpu, --memory, or --gpu.": (
         "--without-gpu 不能与 --cpu、--memory 或 --gpu 同时使用。"
+    ),
+    "--sort must be create_time, order_start_time, or order_end_time.": (
+        "--sort 必须是 create_time、order_start_time 或 order_end_time。"
     ),
     "Hint": "建议",
     "The machine type API returned an unnamed GPU.": "机型接口返回了未命名的 GPU。",
@@ -432,8 +445,9 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "DescribeCompShareInstance did not return Region and Zone for instance {instance}.": (
         "DescribeCompShareInstance 未返回实例 {instance} 的 Region 和 Zone。"
     ),
-    "Attached disk {disk} was not found; pass --region and --zone if it is detached.": (
-        "未找到已挂载云盘 {disk}；如果它已卸载，请指定 --region 和 --zone。"
+    "Disk {disk} was not found.": "未找到云盘 {disk}。",
+    "DescribeCompshareDisk did not return a known location for disk {disk}.": (
+        "DescribeCompshareDisk 未返回云盘 {disk} 的有效地域信息。"
     ),
     "Zone is required for this request.": "本次请求必须明确指定 Zone。",
     "--region and --zone must be provided together.": "--region 和 --zone 必须同时指定。",
@@ -455,6 +469,10 @@ ZH_TRANSLATIONS: Dict[str, str] = {
         "非交互创建必须指定 --region 和 --zone。"
     ),
     "Image {image} was not found.": "未找到镜像 {image}。",
+    "Add a community image group to favorites.": "收藏社区镜像组。",
+    "Remove a community image group from favorites.": "取消收藏社区镜像组。",
+    "Favorited image group {group}": "已收藏镜像组 {group}",
+    "Unfavorited image group {group}": "已取消收藏镜像组 {group}",
     "No project was returned by GetProjectList; pass --project-id explicitly.": (
         "GetProjectList 未返回项目，请显式指定 --project-id。"
     ),

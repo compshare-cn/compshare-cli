@@ -39,6 +39,7 @@ from compshare_cli.ssh import (
     execute_captured,
     execute_captured_with_password,
     execute_with_password,
+    scp_download_command,
     scp_upload_command,
 )
 from compshare_cli.ssh_cache import DEFAULT_TTL, SSHCredentialCache
@@ -2064,13 +2065,16 @@ def charge(
 @app.command("network", help="Check network accelerator status.")
 def network(
     ctx: typer.Context,
-    region: str = typer.Option(..., "--region", help="Region for this request."),
-    zone: str = typer.Option(..., "--zone", help="Availability zone."),
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
+    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
 ) -> None:
+    params = request(ctx, region_value=region)
+    if zone is not None:
+        params["Zone"] = zone
     invoke(
         runtime(ctx),
         "CheckCompShareNetOptimizer",
-        request(ctx, zone=True, region_value=region, zone_value=zone),
+        params,
     )
 
 
@@ -2080,9 +2084,11 @@ def models(
     name: Optional[str] = typer.Option(None, help="Filter by model name."),
     tags: Optional[str] = typer.Option(None, help="Filter by model tags."),
     region: str = typer.Option(..., "--region", help="Region for this request."),
-    zone: str = typer.Option(..., "--zone", help="Availability zone."),
+    zone: Optional[str] = typer.Option(None, "--zone", help="Availability zone."),
 ) -> None:
-    params = request(ctx, zone=True, region_value=region, zone_value=zone)
+    params = request(ctx, region_value=region)
+    if zone is not None:
+        params["Zone"] = zone
     params.update(compact({"name": name, "tags": tags}))
     invoke(
         runtime(ctx),
@@ -2102,7 +2108,7 @@ def models(
 @ports_app.command("list", help="List supported software ports.")
 def list_ports(
     ctx: typer.Context,
-    region: str = typer.Option(..., "--region", help="Region for this request."),
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
 ) -> None:
     invoke(
         runtime(ctx),
@@ -2189,7 +2195,7 @@ def cancel_schedule(
 @software_app.command("list", help="List supported instance software.")
 def list_software(
     ctx: typer.Context,
-    region: str = typer.Option(..., "--region", help="Region for this request."),
+    region: Optional[str] = typer.Option(None, "--region", help="Region for this request."),
 ) -> None:
     invoke(
         runtime(ctx),
@@ -2353,12 +2359,19 @@ def ssh(
     raise typer.Exit(exit_code)
 
 
-@app.command("scp", help="Copy a local file or directory to an instance.")
-def scp(
+@app.command(
+    "scp",
+    help="Copy files or directories between local machine and an instance.",
+    hidden=True,
+)
+@app.command("cp", help="Copy files or directories between local machine and an instance.")
+def cp(
     ctx: typer.Context,
     instance: str,
-    local_path: str = typer.Argument(..., help="Local file or directory."),
-    remote_path: str = typer.Argument(..., help="Destination path on the instance."),
+    source_path: str = typer.Argument(..., help="Source path. Prefix instance paths with :."),
+    destination_path: str = typer.Argument(
+        ..., help="Destination path. Prefix instance paths with :."
+    ),
     print_only: bool = typer.Option(False, "--print", help="Print instead of copying."),
     auto_password: bool = typer.Option(
         True,
@@ -2366,9 +2379,28 @@ def scp(
         help="Automatically enter the password returned by the API.",
     ),
 ) -> None:
-    source = Path(local_path).expanduser()
-    if not source.exists():
-        raise UsageError(tr("Local path {path} does not exist.", path=local_path))
+    source_is_remote = source_path.startswith(":")
+    destination_is_remote = destination_path.startswith(":")
+    if source_is_remote and destination_is_remote:
+        raise UsageError(tr("Both source and destination cannot be instance paths."))
+
+    direction = "download" if source_is_remote else "upload"
+    if direction == "download":
+        remote_path = source_path[1:]
+        local = Path(destination_path).expanduser().absolute()
+        local_parent = local if local.is_dir() else local.parent
+        if not local_parent.exists():
+            raise UsageError(
+                tr("Local destination parent {path} does not exist.", path=str(local_parent))
+            )
+    else:
+        local = Path(source_path).expanduser()
+        remote_path = destination_path[1:] if destination_is_remote else destination_path
+        if not local.exists():
+            raise UsageError(tr("Local path {path} does not exist.", path=source_path))
+
+    if not remote_path:
+        raise UsageError(tr("Remote path cannot be empty."))
 
     state = runtime(ctx)
     _, _, host = locate_instance(state, instance)
@@ -2378,12 +2410,16 @@ def scp(
     if not login_command:
         raise UsageError(tr("Instance {instance} has no SSH login command.", instance=instance))
     try:
-        argv = scp_upload_command(
-            shlex.split(str(login_command)),
-            str(source.resolve()),
-            remote_path,
-            recursive=source.is_dir(),
-        )
+        ssh_argv = shlex.split(str(login_command))
+        if direction == "download":
+            argv = scp_download_command(ssh_argv, remote_path, str(local), recursive=True)
+        else:
+            argv = scp_upload_command(
+                ssh_argv,
+                str(local.resolve()),
+                remote_path,
+                recursive=local.is_dir(),
+            )
     except ValueError as exc:
         raise UsageError(tr("The instance SSH login command cannot be used for SCP.")) from exc
 

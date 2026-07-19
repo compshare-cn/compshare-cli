@@ -111,7 +111,10 @@ class Renderer:
         table = Table(show_header=True, header_style="bold")
         for key, label in columns:
             justify = "right" if key in {"CPU", "GPU", "Size", "Price", "InstancePrice"} else "left"
-            table.add_column(tr(label), justify=justify)
+            if key == "ResourceId":
+                table.add_column(tr(label), justify=justify, min_width=24, no_wrap=True)
+            else:
+                table.add_column(tr(label), justify=justify)
         count = 0
         for row in rows or ():
             count += 1

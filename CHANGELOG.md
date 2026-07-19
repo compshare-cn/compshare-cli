@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.3
 
+- 将语言设置从 `lang` 子命令调整为全局 `--lang zh|en` 选项，并将 `feedback` 在根命令
+  帮助中的位置调整到 `config` 与 `doctor` 之间。
+- 增加 `instance cp` 双向复制；使用 `:/path` 标记实例路径，支持本地与实例之间自动认证、
+  自动递归的上传和下载，并保留原有 `instance scp` 上传语法兼容性。
 - `--json instance scp` 现在会真实上传，并返回结构化执行结果；`--print` 保持为仅预览。
 - JSON 模式不再启动凭证或危险操作确认提示；需要确认的操作必须显式传入 `--yes`。
 - 交互确认在空输入或无效输入时最多重试三次。
@@ -12,6 +16,13 @@
 - 增加纯客户端的实例配置模板；支持本地创建、列表、查看、删除，以及通过
   `instance create --template NAME` 加载并用显式参数覆盖模板值。
 - 移除当前不可用的 `instance monitor` 和独立 `instance software url` 命令。
+- 修正云盘列表误用实例接口的问题，改用 `DescribeCompshareDisk` 并完整显示
+  `ResourceId`；已卸载云盘也可被自动定位。
+- 镜像收藏迁移到 `Create/DeleteCompShareImageFavorite`，使用社区镜像 `GroupId`；平台镜像
+  列表按类型执行正确的全局分页。
+- 放宽镜像列表、网络检测、软件端口和模型查询中接口不需要的 Region/Zone 限制。
+- 修正团队账单排序字段/方向的接口值，并让欠费汇总沿用列表的时间范围。
+- 开放 Typer 内置的 Bash、Zsh、Fish 和 PowerShell 命令补全安装及脚本输出选项。
 
 ## 0.3.2
 

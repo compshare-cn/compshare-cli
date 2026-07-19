@@ -34,8 +34,9 @@ INSTANCE_ACTIONS = frozenset(
 
 IMAGE_ACTIONS = frozenset(
     {
-        "AddFavoriteImage",
+        "CreateCompShareImageFavorite",
         "CreateCompShareCustomImage",
+        "DeleteCompShareImageFavorite",
         "DescribeCommunityImages",
         "DescribeCompShareCustomImages",
         "DescribeCompShareImages",
@@ -47,7 +48,6 @@ IMAGE_ACTIONS = frozenset(
         "GetCompShareImageCreateProgress",
         "ModifyCompShareImageShareAccount",
         "PublishCompShareImage",
-        "RemoveFavoriteImage",
         "TerminateCompShareCustomImage",
         "UpdateCompShareImage",
     }
@@ -59,6 +59,7 @@ STORAGE_ACTIONS = frozenset(
         "AttachUS3",
         "CreateAndAttachCompshareDisk",
         "DeleteCompshareDisk",
+        "DescribeCompshareDisk",
         "DetachCompshareDisk",
         "GetCompShareAttachedDiskUpgradePrice",
         "ResizeCompShareDisk",
@@ -95,8 +96,10 @@ COMING_SOON_ACTIONS = frozenset()
 # Documented publicly but unavailable in the production API.
 UNAVAILABLE_ACTIONS = frozenset(
     {
+        "AddFavoriteImage",
         "DescribeFavoriteImages",
         "GetCompShareInstanceMonitor",
         "GetSoftwareURL",
+        "RemoveFavoriteImage",
     }
 )

@@ -4,9 +4,11 @@ import json
 import pytest
 from typer.main import get_command
 from typer.testing import CliRunner
+from ucloud.core import exc as ucloud_exc
 
 from compshare_cli import __version__, cli, insights
 from compshare_cli.config import Profile
+from compshare_cli.errors import CLIError
 
 runner = CliRunner()
 
@@ -76,6 +78,21 @@ def test_insights_uses_external_gateway_by_default(monkeypatch) -> None:
     assert response == {"ok": True, "id": "feedback-8"}
     assert captured["base_url"] == "https://api.compshare.cn"
     assert captured["action"] == "CreateCSCLIFeedback"
+
+
+def test_feedback_formats_gateway_rejection(monkeypatch) -> None:
+    def reject(*_args):
+        raise ucloud_exc.RetCodeException(
+            action="CreateCSCLIFeedback",
+            code=1001,
+            message="invalid request body",
+            request_uuid="request-1",
+        )
+
+    monkeypatch.setattr(insights, "_invoke", reject)
+
+    with pytest.raises(CLIError, match="invalid request body"):
+        insights.submit_feedback(Profile("public", "private"), "suggest", "建议内容")
 
 
 def test_telemetry_contains_only_requested_fields(monkeypatch) -> None:

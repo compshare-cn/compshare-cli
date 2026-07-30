@@ -718,7 +718,7 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Feedback service is not configured; set {variable}.": (
         "反馈服务尚未配置，请设置 {variable}。"
     ),
-    "Insights service rejected the request: {message}": "数据服务拒绝了请求：{message}",
+    "Insights service rejected the request: {detail}": "数据服务拒绝了请求：{detail}",
     "Unable to reach the insights service.": "无法连接数据服务。",
     "Insights service returned an invalid response.": "数据服务返回了无效响应。",
     "Thank you for your feedback.": "感谢反馈。",

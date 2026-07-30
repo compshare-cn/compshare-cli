@@ -106,8 +106,8 @@ def submit_feedback(
     except ucloud_exc.RetCodeException as error:
         raise CLIError(
             tr(
-                "Insights service rejected the request: {message}",
-                message=error.message or str(error.code),
+                "Insights service rejected the request: {detail}",
+                detail=error.message or str(error.code),
             )
         ) from error
     except (ucloud_exc.UCloudException, TimeoutError, OSError) as error:

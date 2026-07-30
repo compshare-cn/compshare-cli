@@ -38,6 +38,9 @@ export COMPSHARE_PUBLIC_KEY='...'
 export COMPSHARE_PRIVATE_KEY='...'
 ```
 
+CLI 使用统计和反馈与业务 API 一样，通过当前 profile 的凭证签名后发送到
+`https://api.compshare.cn/`；开发环境可使用 `COMPSHARE_INSIGHTS_URL` 覆盖网关地址。
+
 ## 快速开始
 
 ```bash

@@ -506,16 +506,45 @@ def _requested_language(argv: List[str]) -> Optional[str]:
     return requested
 
 
+def _requested_profile(argv: List[str]) -> Optional[str]:
+    """Return the root --profile value, if present."""
+    index = 0
+    while index < len(argv):
+        option = argv[index]
+        if option == "--profile":
+            return argv[index + 1] if index + 1 < len(argv) else None
+        if option.startswith("--profile="):
+            return option.split("=", 1)[1] or None
+        if option in {"--lang"}:
+            index += 2
+            continue
+        if option.startswith("--lang=") or option in {
+            "--json",
+            "--show-sensitive",
+            "--version",
+            "-h",
+            "--help",
+        }:
+            index += 1
+            continue
+        if not option.startswith("-"):
+            break
+        index += 1
+    return None
+
+
 def main(args: Optional[List[str]] = None) -> None:
     original_argv = list(sys.argv[1:] if args is None else args)
     argv = list(original_argv)
     if not argv:
         argv = ["-h"]
     telemetry_command: Optional[str] = None
+    telemetry_profile: Optional[str] = None
     json_output = _global_flag_requested(argv, "--json")
     show_sensitive = _global_flag_requested(argv, "--show-sensitive")
     try:
         argv = _normalize_global_options(argv)
+        telemetry_profile = _requested_profile(argv)
         requested_language = _requested_language(argv)
         if requested_language is None:
             language = configured_language()
@@ -547,7 +576,10 @@ def main(args: Optional[List[str]] = None) -> None:
         raise SystemExit(1) from error
     finally:
         if telemetry_command:
-            record_command(telemetry_command)
+            if telemetry_profile is None:
+                record_command(telemetry_command)
+            else:
+                record_command(telemetry_command, telemetry_profile)
     if isinstance(result, int) and result:
         raise SystemExit(result)
 

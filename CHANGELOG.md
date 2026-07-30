@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 将 CLI 使用统计和反馈从旧外网 IP 的 `/v1` 接口迁移到 CompShare 外部网关，
+  通过 UCloud SDK 签名调用 `CreateCSCLIEvent` 和 `CreateCSCLIFeedback`。
+
 ## 0.3.5
 
 - 精简 README 的安装和快速开始内容，新增 CompShare SDK 多语言示例入口。

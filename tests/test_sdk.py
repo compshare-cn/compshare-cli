@@ -15,6 +15,15 @@ def test_official_sdk_accepts_no_default_region() -> None:
     assert sdk._service.config.region is None
 
 
+def test_official_sdk_accepts_base_url_override() -> None:
+    sdk = CompShareSDK(
+        Profile("public", "private"),
+        base_url="https://insights.example.test",
+    )
+
+    assert sdk._service.config.base_url == "https://insights.example.test"
+
+
 def test_sdk_uses_generic_invoke_and_quiet_logger(monkeypatch) -> None:
     captured = {}
 

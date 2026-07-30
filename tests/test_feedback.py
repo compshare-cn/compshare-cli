@@ -1,41 +1,28 @@
 import base64
 import json
-from urllib import parse
 
 import pytest
 from typer.main import get_command
 from typer.testing import CliRunner
 
 from compshare_cli import __version__, cli, insights
+from compshare_cli.config import Profile
 
 runner = CliRunner()
-
-
-class Response:
-    def __init__(self, payload):
-        self.payload = payload
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return None
-
-    def read(self):
-        return json.dumps(self.payload).encode("utf-8")
 
 
 def test_feedback_posts_category_and_message(monkeypatch) -> None:
     captured = {}
 
-    def fake_urlopen(req, timeout):
-        captured["url"] = req.full_url
-        captured["payload"] = json.loads(req.data)
-        captured["timeout"] = timeout
-        return Response({"ok": True, "id": 7})
+    def fake_invoke(profile, action, payload):
+        captured["profile"] = profile
+        captured["action"] = action
+        captured["payload"] = payload
+        return {"Id": "feedback-7"}
 
-    monkeypatch.setenv("COMPSHARE_INSIGHTS_URL", "https://insights.example.test/")
-    monkeypatch.setattr(insights.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("COMPSHARE_PUBLIC_KEY", "public")
+    monkeypatch.setenv("COMPSHARE_PRIVATE_KEY", "private")
+    monkeypatch.setattr(insights, "_invoke", fake_invoke)
     result = runner.invoke(
         cli.app,
         ["--json", "feedback", "bug", "创建实例失败"],
@@ -45,13 +32,19 @@ def test_feedback_posts_category_and_message(monkeypatch) -> None:
     assert json.loads(result.stdout) == {
         "ok": True,
         "schema_version": "1",
-        "data": {"id": 7},
+        "data": {"id": "feedback-7"},
     }
-    assert captured["url"] == "https://insights.example.test/v1/feedback"
-    assert captured["timeout"] == 5.0
-    assert captured["payload"]["category"] == "bug"
-    assert captured["payload"]["message"] == "创建实例失败"
-    assert set(captured["payload"]) == {"category", "message", "cli_version", "os", "time"}
+    assert captured["profile"] == Profile("public", "private")
+    assert captured["action"] == "CreateCSCLIFeedback"
+    assert captured["payload"]["Category"] == "bug"
+    assert captured["payload"]["Content"] == "创建实例失败"
+    assert set(captured["payload"]) == {
+        "Category",
+        "Content",
+        "CLIVersion",
+        "OS",
+        "OccurredAt",
+    }
 
 
 def test_feedback_only_accepts_bug_or_suggest() -> None:
@@ -62,19 +55,27 @@ def test_feedback_only_accepts_bug_or_suggest() -> None:
     assert "suggest" in result.output
 
 
-def test_feedback_uses_default_service(monkeypatch) -> None:
+def test_insights_uses_external_gateway_by_default(monkeypatch) -> None:
     captured = {}
 
-    def fake_urlopen(req, timeout):
-        captured["url"] = req.full_url
-        return Response({"ok": True})
+    class FakeSDK:
+        def __init__(self, profile, region=None, base_url=None):
+            captured["profile"] = profile
+            captured["region"] = region
+            captured["base_url"] = base_url
+
+        def invoke(self, action, payload):
+            captured["action"] = action
+            captured["payload"] = payload
+            return {"Id": "feedback-8"}
 
     monkeypatch.delenv("COMPSHARE_INSIGHTS_URL", raising=False)
-    monkeypatch.setattr(insights.request, "urlopen", fake_urlopen)
-    result = runner.invoke(cli.app, ["feedback", "suggest", "建议内容"])
+    monkeypatch.setattr(insights, "CompShareSDK", FakeSDK)
+    response = insights.submit_feedback(Profile("public", "private"), "suggest", "建议内容")
 
-    assert result.exit_code == 0, result.output
-    assert captured["url"] == "http://117.50.180.139:27299/v1/feedback"
+    assert response == {"ok": True, "id": "feedback-8"}
+    assert captured["base_url"] == "https://api.compshare.cn"
+    assert captured["action"] == "CreateCSCLIFeedback"
 
 
 def test_telemetry_contains_only_requested_fields(monkeypatch) -> None:
@@ -87,36 +88,51 @@ def test_telemetry_contains_only_requested_fields(monkeypatch) -> None:
 
     monkeypatch.setenv("COMPSHARE_INSIGHTS_URL", "https://insights.example.test")
     monkeypatch.setattr(insights.subprocess, "Popen", fake_popen)
-    insights.record_command("instance.create")
+    insights.record_command("instance.create", "work")
 
     encoded = launched["args"][-1]
-    payload = json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
-    assert payload["command"] == "instance.create"
-    assert set(payload) == {"command", "cli_version", "os", "time"}
+    document = json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
+    assert document["profile_name"] == "work"
+    assert document["payload"]["Command"] == "instance.create"
+    assert set(document["payload"]) == {"Command", "CLIVersion", "OS", "OccurredAt"}
     assert launched["kwargs"]["stdout"] is insights.subprocess.DEVNULL
 
 
 def test_event_worker_posts_to_event_endpoint(monkeypatch) -> None:
     captured = {}
-    payload = {
-        "command": "image.list",
-        "cli_version": "0.2.1",
-        "os": "linux",
-        "time": "2026-07-17T10:00:00Z",
+    document = {
+        "profile_name": "work",
+        "payload": {
+            "Command": "image.list",
+            "CLIVersion": "0.2.1",
+            "OS": "linux",
+            "OccurredAt": "2026-07-17T10:00:00Z",
+        },
     }
-    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+    encoded = base64.urlsafe_b64encode(json.dumps(document).encode("utf-8")).decode("ascii")
 
-    def fake_urlopen(req, timeout):
-        captured["url"] = req.full_url
-        captured["payload"] = json.loads(req.data)
-        return Response({"ok": True})
+    def fake_load_profile(profile_name):
+        captured["profile_name"] = profile_name
+        return Profile("public", "private")
 
-    monkeypatch.setenv("COMPSHARE_INSIGHTS_URL", "https://insights.example.test")
-    monkeypatch.setattr(insights.request, "urlopen", fake_urlopen)
+    def fake_invoke(profile, action, payload):
+        captured["profile"] = profile
+        captured["action"] = action
+        captured["payload"] = payload
+        return {"Id": "event-1"}
+
+    monkeypatch.setattr(
+        insights.ConfigStore,
+        "load_profile",
+        lambda self, name: fake_load_profile(name),
+    )
+    monkeypatch.setattr(insights, "_invoke", fake_invoke)
     insights._send_event(encoded)
 
-    assert parse.urlparse(captured["url"]).path == "/v1/events"
-    assert captured["payload"] == payload
+    assert captured["profile_name"] == "work"
+    assert captured["profile"] == Profile("public", "private")
+    assert captured["action"] == "CreateCSCLIEvent"
+    assert captured["payload"] == document["payload"]
 
 
 @pytest.mark.parametrize(
@@ -157,3 +173,13 @@ def test_main_records_resolved_command(monkeypatch, capsys) -> None:
 
     assert capsys.readouterr().out.strip() == __version__
     assert commands == ["version"]
+
+
+def test_main_passes_selected_profile_to_telemetry(monkeypatch, capsys) -> None:
+    calls = []
+    monkeypatch.setattr(cli, "record_command", lambda *args: calls.append(args))
+
+    cli.main(["--profile", "work", "version"])
+
+    assert capsys.readouterr().out.strip() == __version__
+    assert calls == [("version", "work")]

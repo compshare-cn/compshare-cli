@@ -7,16 +7,21 @@ import platform
 import subprocess
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict
-from urllib import error as urlerror
-from urllib import parse, request
+from typing import Any, Dict, Optional
+from urllib import parse
+
+from ucloud.core import exc as ucloud_exc
 
 from compshare_cli import __version__
+from compshare_cli.config import ConfigStore, Profile
 from compshare_cli.errors import CLIError
 from compshare_cli.i18n import tr
+from compshare_cli.sdk import CompShareSDK
 
 ENDPOINT_ENV = "COMPSHARE_INSIGHTS_URL"
-DEFAULT_ENDPOINT = "http://117.50.180.139:27299"
+DEFAULT_ENDPOINT = "https://api.compshare.cn"
+EVENT_ACTION = "CreateCSCLIEvent"
+FEEDBACK_ACTION = "CreateCSCLIFeedback"
 
 
 def now() -> str:
@@ -28,18 +33,21 @@ def os_name() -> str:
     return value or sys.platform.lower()
 
 
-def record_command(command: str) -> None:
+def record_command(command: str, profile_name: Optional[str] = None) -> None:
     """Report a command in a detached process without delaying or affecting the CLI."""
     if not _base_url():
         return
-    payload = {
-        "command": command,
-        "cli_version": __version__,
-        "os": os_name(),
-        "time": now(),
+    document = {
+        "profile_name": profile_name,
+        "payload": {
+            "Command": command,
+            "CLIVersion": __version__,
+            "OS": os_name(),
+            "OccurredAt": now(),
+        },
     }
     encoded = base64.urlsafe_b64encode(
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
     kwargs: Dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
@@ -60,7 +68,11 @@ def record_command(command: str) -> None:
         pass
 
 
-def submit_feedback(category: str, message: str) -> Dict[str, Any]:
+def submit_feedback(
+    profile: Profile,
+    category: str,
+    message: str,
+) -> Dict[str, Any]:
     if category not in {"bug", "suggest"}:
         raise CLIError(tr("Feedback category must be bug or suggest."))
     normalized = message.strip()
@@ -75,17 +87,33 @@ def submit_feedback(category: str, message: str) -> Dict[str, Any]:
                 variable=ENDPOINT_ENV,
             )
         )
-    return _post(
-        "/v1/feedback",
-        {
-            "category": category,
-            "message": normalized,
-            "cli_version": __version__,
-            "os": os_name(),
-            "time": now(),
-        },
-        timeout=5.0,
-    )
+    try:
+        response = _invoke(
+            profile,
+            FEEDBACK_ACTION,
+            {
+                "Category": category,
+                "Content": normalized,
+                "CLIVersion": __version__,
+                "OS": os_name(),
+                "OccurredAt": now(),
+            },
+        )
+        feedback_id = response.get("Id") if isinstance(response, dict) else None
+        if not feedback_id:
+            raise ValueError("missing feedback ID")
+        return {"ok": True, "id": feedback_id}
+    except ucloud_exc.RetCodeException as error:
+        raise CLIError(
+            tr(
+                "Insights service rejected the request: {message}",
+                message=error.message or str(error.code),
+            )
+        ) from error
+    except (ucloud_exc.UCloudException, TimeoutError, OSError) as error:
+        raise CLIError(tr("Unable to reach the insights service.")) from error
+    except Exception as error:
+        raise CLIError(tr("Insights service returned an invalid response.")) from error
 
 
 def _base_url() -> str:
@@ -96,43 +124,22 @@ def _base_url() -> str:
     return value if parsed.scheme in {"http", "https"} and parsed.netloc else ""
 
 
-def _post(path: str, payload: Dict[str, Any], *, timeout: float) -> Dict[str, Any]:
-    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    req = request.Request(
-        f"{_base_url()}{path}",
-        data=body,
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": f"compshare-cli/{__version__}",
-        },
-        method="POST",
-    )
-    try:
-        with request.urlopen(req, timeout=timeout) as response:
-            content = response.read()
-    except urlerror.HTTPError as error:
-        raise CLIError(
-            tr("Insights service rejected the request with HTTP {status}.", status=error.code)
-        ) from error
-    except (urlerror.URLError, TimeoutError, OSError) as error:
-        raise CLIError(tr("Unable to reach the insights service.")) from error
-    if not content:
-        return {"ok": True}
-    try:
-        result = json.loads(content.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise CLIError(tr("Insights service returned an invalid response.")) from error
-    if not isinstance(result, dict):
-        raise CLIError(tr("Insights service returned an invalid response."))
-    return result
+def _invoke(profile: Profile, action: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    return CompShareSDK(profile, base_url=_base_url()).invoke(action, payload)
 
 
 def _send_event(encoded: str) -> None:
     try:
-        payload = json.loads(base64.urlsafe_b64decode(encoded.encode("ascii")).decode("utf-8"))
-        if isinstance(payload, dict) and _base_url():
-            _post("/v1/events", payload, timeout=3.0)
+        document = json.loads(base64.urlsafe_b64decode(encoded.encode("ascii")).decode("utf-8"))
+        if not isinstance(document, dict) or not _base_url():
+            return
+        payload = document.get("payload")
+        if not isinstance(payload, dict):
+            return
+        raw_profile_name = document.get("profile_name")
+        profile_name = str(raw_profile_name) if raw_profile_name else None
+        profile = ConfigStore().load_profile(profile_name)
+        _invoke(profile, EVENT_ACTION, payload)
     except Exception:
         pass
 

@@ -14,7 +14,7 @@ class FeedbackCategory(str, Enum):
 
 
 def run(state: Runtime, category: FeedbackCategory, message: str) -> None:
-    response = submit_feedback(category.value, message)
+    response = submit_feedback(state.profile, category.value, message)
     Renderer(state.json_output, state.show_sensitive).success(
         tr("Thank you for your feedback."), response
     )

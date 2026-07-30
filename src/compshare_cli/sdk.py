@@ -17,13 +17,21 @@ class CompShareSDK:
     lag behind the public API and silently discard newer fields.
     """
 
-    def __init__(self, profile: Profile, region: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        profile: Profile,
+        region: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> None:
         logger = logging.getLogger("compshare_cli.ucloud")
         logger.handlers.clear()
         logger.addHandler(logging.NullHandler())
         logger.setLevel(logging.CRITICAL)
         logger.propagate = False
-        self._service = Client(profile.sdk_config(region), logger=logger).ucompshare()
+        config = profile.sdk_config(region)
+        if base_url is not None:
+            config["base_url"] = base_url
+        self._service = Client(config, logger=logger).ucompshare()
 
     def invoke(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         return self._service.invoke(action, params)

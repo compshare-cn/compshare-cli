@@ -5,11 +5,16 @@ from typing import Any, Dict, Optional
 
 import click
 import typer
+from typer import core as typer_core
 
 from compshare_cli.errors import UsageError
 from compshare_cli.i18n import tr
 from compshare_cli.output import Renderer
 from compshare_cli.runtime import Runtime
+
+_TYPER_CLICK = getattr(typer_core, "_click", click)
+_CLICK_GLOBALS = getattr(_TYPER_CLICK, "globals", _TYPER_CLICK)
+_GET_CURRENT_CONTEXT = getattr(_CLICK_GLOBALS, "get_current_context", click.get_current_context)
 
 
 def runtime(ctx: typer.Context) -> Runtime:
@@ -43,7 +48,7 @@ def confirm(message: str, yes: bool) -> None:
     if yes:
         return
 
-    context = click.get_current_context(silent=True)
+    context = _GET_CURRENT_CONTEXT(silent=True)
     state = context.find_root().obj if context is not None else None
     if isinstance(state, Runtime) and state.json_output:
         raise UsageError(

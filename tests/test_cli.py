@@ -54,6 +54,8 @@ def isolate_ssh_cache(monkeypatch, tmp_path) -> None:
         ["image", "--help"],
         ["storage", "--help"],
         ["storage", "disk", "--help"],
+        ["bandwidth", "--help"],
+        ["minimax", "--help"],
         ["team", "--help"],
         ["team", "invite", "--help"],
         ["team", "billing", "--help"],
@@ -367,7 +369,7 @@ def test_lang_option_persists_help_language(monkeypatch, tmp_path, capsys) -> No
 
     cli.main(["--lang", "en", "--help"])
     changed = capsys.readouterr().out
-    assert "Manage CompShare GPU compute from the terminal" in changed
+    assert "Manage CompShare GPU compute and MiniMax H3 from the terminal" in changed
     assert json.loads(config_file.read_text(encoding="utf-8"))["language"] == "en"
 
     cli.main(["instance", "--help"])
@@ -2158,7 +2160,7 @@ def test_ssh_falls_back_when_password_automation_is_unavailable(monkeypatch) -> 
 
     assert result.exit_code == 0, result.output
     assert "instance-secret" not in result.stdout
-    assert "无法自动填写密码" in result.stdout
+    assert "无法自动填写密码" in result.stdout + result.stderr
     assert commands == [["ssh", "root@example.invalid"]]
 
 

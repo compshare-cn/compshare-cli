@@ -1,4 +1,4 @@
-"""Public CompShare API actions covered by the first CLI release."""
+"""Public CompShare API actions covered by the CLI."""
 
 INSTANCE_ACTIONS = frozenset(
     {
@@ -88,7 +88,22 @@ TEAM_ACTIONS = frozenset(
     }
 )
 
-PUBLIC_ACTIONS = INSTANCE_ACTIONS | IMAGE_ACTIONS | STORAGE_ACTIONS | TEAM_ACTIONS
+BANDWIDTH_ACTIONS = frozenset(
+    {
+        "CreateCompShareShareBandwidth",
+        "DeleteCompShareShareBandwidth",
+        "DescribeCompShareShareBandwidth",
+        "GetCompShareShareBandwidthPrice",
+        "GetCompShareShareBandwidthRefundPrice",
+        "GetCompShareShareBandwidthUpgradePrice",
+        "ModifyCompShareShareBandwidth",
+        "SwitchCompShareEIPShareBandwidth",
+    }
+)
+
+PUBLIC_ACTIONS = (
+    INSTANCE_ACTIONS | IMAGE_ACTIONS | STORAGE_ACTIONS | TEAM_ACTIONS | BANDWIDTH_ACTIONS
+)
 
 # No unavailable API actions are currently exposed as placeholders.
 COMING_SOON_ACTIONS = frozenset()

@@ -53,6 +53,21 @@ def test_sdk_uses_generic_invoke_and_quiet_logger(monkeypatch) -> None:
     assert captured["logger"].propagate is False
 
 
+def test_sdk_invoke_does_not_mutate_the_callers_params(monkeypatch) -> None:
+    class FakeService:
+        def invoke(self, action, params):
+            params["Action"] = action
+            return {"RetCode": 0}
+
+    sdk = object.__new__(CompShareSDK)
+    sdk._service = FakeService()
+    params = {"Region": "cn-wlcb"}
+
+    sdk.invoke("DescribeCompShareInstance", params)
+
+    assert params == {"Region": "cn-wlcb"}
+
+
 def test_sdk_download_uses_authenticated_service_transport(monkeypatch) -> None:
     captured = {}
 

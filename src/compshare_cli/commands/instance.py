@@ -19,7 +19,12 @@ from compshare_cli.config import ConfigStore
 from compshare_cli.errors import UsageError
 from compshare_cli.i18n import tr
 from compshare_cli.instance_templates import InstanceTemplateStore, template_path
-from compshare_cli.location import instance_location, locate_instance, supported_locations
+from compshare_cli.location import (
+    instance_location,
+    locate_instance,
+    supported_locations,
+)
+from compshare_cli.location import locate_instances as locate_instances_by_id
 from compshare_cli.output import Renderer
 from compshare_cli.parsing import (
     compact,
@@ -607,24 +612,7 @@ def _locate_instances(
     state: Runtime,
     instances: Sequence[str],
 ) -> Tuple[Dict[str, Tuple[str, str, Dict[str, Any]]], List[str]]:
-    requested = list(dict.fromkeys(instances))
-    remaining = set(requested)
-    found: Dict[str, Tuple[str, str, Dict[str, Any]]] = {}
-    response = collect_pages(
-        state,
-        "DescribeCompShareInstance",
-        {"UHostIds": list(remaining)},
-        "UHostSet",
-    )
-    for raw in response.get("UHostSet") or []:
-        host = dict(raw)
-        instance = str(host.get("UHostId") or "")
-        if instance not in remaining:
-            continue
-        region, zone = instance_location(host, instance)
-        found[instance] = (region, zone, host)
-        remaining.remove(instance)
-    return found, [instance for instance in requested if instance in remaining]
+    return locate_instances_by_id(state, instances, page_collector=collect_pages)
 
 
 def _price_total(price: Dict[str, Any], count: int) -> Optional[Decimal]:

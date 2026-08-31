@@ -11,9 +11,9 @@ from typer.main import get_command
 
 from compshare_cli import __version__
 from compshare_cli.commands import ask as ask_command
+from compshare_cli.commands import bandwidth, image, instance, minimax, storage, team
 from compshare_cli.commands import doctor as doctor_command
 from compshare_cli.commands import feedback as feedback_command
-from compshare_cli.commands import image, instance, storage, team
 from compshare_cli.commands.common import confirm
 from compshare_cli.config import DEFAULT_PROFILE, ConfigStore, Profile
 from compshare_cli.errors import CLIError, ConfigError, UsageError
@@ -26,6 +26,10 @@ _TYPER_CLICK = getattr(typer_core, "_click", click)
 _TYPER_CLICK_EXCEPTIONS = getattr(_TYPER_CLICK, "exceptions", _TYPER_CLICK)
 _CLICK_EXCEPTIONS = (click.ClickException, _TYPER_CLICK_EXCEPTIONS.ClickException)
 _ABORT_EXCEPTIONS = (click.Abort, _TYPER_CLICK_EXCEPTIONS.Abort)
+_GROUP_TYPES = (click.Group, typer_core.TyperGroup)
+_OPTION_TYPES = (click.Option, typer_core.TyperOption)
+_ARGUMENT_TYPES = (click.Argument, typer_core.TyperArgument)
+_CLICK_CONTEXT = getattr(_TYPER_CLICK, "Context", click.Context)
 
 completion_init()
 
@@ -42,7 +46,7 @@ class RootGroup(typer_core.TyperGroup):
 
 app = typer.Typer(
     name="compshare",
-    help="Manage CompShare GPU compute from the terminal.",
+    help="Manage CompShare GPU compute and MiniMax H3 from the terminal.",
     cls=RootGroup,
     no_args_is_help=True,
     add_completion=False,
@@ -51,6 +55,8 @@ app = typer.Typer(
 app.add_typer(instance.app, name="instance")
 app.add_typer(image.app, name="image")
 app.add_typer(storage.app, name="storage")
+app.add_typer(bandwidth.app, name="bandwidth")
+app.add_typer(minimax.app, name="minimax")
 app.add_typer(team.app, name="team")
 config_app = typer.Typer(
     help="Manage credential profiles.",
@@ -391,7 +397,7 @@ def _command_path(command: click.Command, argv: List[str]) -> Optional[str]:
 
     path: List[str] = []
     current = command
-    while remaining and isinstance(current, click.Group):
+    while remaining and isinstance(current, _GROUP_TYPES):
         name = remaining.pop(0)
         child = current.commands.get(name)
         if child is None:
@@ -429,13 +435,13 @@ def _json_help_payload(command: click.Command, argv: List[str]) -> Dict[str, Any
             "--show-sensitive",
         }:
             continue
-        if isinstance(current, click.Group) and token in current.commands:
+        if isinstance(current, _GROUP_TYPES) and token in current.commands:
             current = current.commands[token]
             path.append(token)
 
     parameters: List[Dict[str, Any]] = []
     for parameter in current.params:
-        if isinstance(parameter, click.Option):
+        if isinstance(parameter, _OPTION_TYPES):
             parameters.append(
                 {
                     "kind": "option",
@@ -446,7 +452,7 @@ def _json_help_payload(command: click.Command, argv: List[str]) -> Dict[str, Any
                     "help": parameter.help,
                 }
             )
-        elif isinstance(parameter, click.Argument):
+        elif isinstance(parameter, _ARGUMENT_TYPES):
             parameters.append(
                 {
                     "kind": "argument",
@@ -456,11 +462,11 @@ def _json_help_payload(command: click.Command, argv: List[str]) -> Dict[str, Any
                 }
             )
     commands = []
-    if isinstance(current, click.Group):
+    if isinstance(current, _GROUP_TYPES):
         commands = [
             {"name": name, "help": child.get_short_help_str()}
-            for name in current.list_commands(click.Context(current))
-            if (child := current.get_command(click.Context(current), name)) is not None
+            for name in current.list_commands(_CLICK_CONTEXT(current))
+            if (child := current.get_command(_CLICK_CONTEXT(current), name)) is not None
             and not child.hidden
         ]
     command_name = " ".join(["compshare", *path])

@@ -34,7 +34,7 @@ class CompShareSDK:
         self._service = Client(config, logger=logger).ucompshare()
 
     def invoke(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        return self._service.invoke(action, params)
+        return self._service.invoke(action, dict(params))
 
     def download(self, action: str, params: Dict[str, Any]) -> Tuple[bytes, Dict[str, str]]:
         """Invoke an authenticated action whose success response is a file stream."""

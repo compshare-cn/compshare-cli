@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from compshare_cli.api import call
+from compshare_cli.api import call, collect_pages
 from compshare_cli.errors import UsageError
 from compshare_cli.i18n import tr
 from compshare_cli.runtime import Runtime
@@ -52,6 +52,33 @@ def locate_instance(
         region, zone = instance_location(host, instance)
         return region, zone, host
     raise UsageError(tr("Instance {instance} was not found.", instance=instance))
+
+
+def locate_instances(
+    state: Runtime,
+    instances: Sequence[str],
+    *,
+    page_collector: Callable[..., Dict[str, Any]] = collect_pages,
+) -> Tuple[Dict[str, Tuple[str, str, Dict[str, Any]]], List[str]]:
+    """Locate instances in one inventory request and preserve the requested order."""
+    requested = list(dict.fromkeys(instances))
+    remaining = set(requested)
+    found: Dict[str, Tuple[str, str, Dict[str, Any]]] = {}
+    response = page_collector(
+        state,
+        "DescribeCompShareInstance",
+        {"UHostIds": requested},
+        "UHostSet",
+    )
+    for raw in response.get("UHostSet") or []:
+        host = dict(raw)
+        instance = str(host.get("UHostId") or "")
+        if instance not in remaining:
+            continue
+        region, zone = instance_location(host, instance)
+        found[instance] = (region, zone, host)
+        remaining.remove(instance)
+    return found, [instance for instance in requested if instance in remaining]
 
 
 def locate_disk(

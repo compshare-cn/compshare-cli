@@ -12,6 +12,9 @@ DEFAULT_LANGUAGE = "zh"
 
 ZH_TRANSLATIONS: Dict[str, str] = {
     "Manage CompShare GPU compute from the terminal.": "在终端管理优云智算 GPU 计算资源。",
+    "Manage CompShare GPU compute and MiniMax H3 from the terminal.": (
+        "在终端管理优云智算 GPU 计算资源和 MiniMax H3。"
+    ),
     "Emit machine-readable JSON.": "输出机器可读的 JSON。",
     "Show passwords, IP addresses, access URLs, and login commands.": (
         "显示密码、IP 地址、访问 URL 和登录命令。"
@@ -34,6 +37,93 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Ask a CompShare product question.": "询问优云智算产品问题。",
     "Question to answer.": "需要回答的问题。",
     "Manage GPU instances.": "管理 GPU 实例。",
+    "Manage dedicated bandwidth.": "管理独享带宽。",
+    "List dedicated bandwidth resources.": "列出独享带宽资源。",
+    "List instance EIP bandwidth assignments.": "列出实例 EIP 的带宽归属。",
+    "Purchase dedicated bandwidth after quoting the price.": "询价后购买独享带宽。",
+    "Change a dedicated bandwidth limit after quoting the price.": "询价后修改独享带宽上限。",
+    "Delete dedicated bandwidth after quoting the refund.": "询价后删除独享带宽。",
+    "Switch instance EIPs between dedicated and shared bandwidth.": (
+        "在独享带宽和共享带宽之间切换实例 EIP。"
+    ),
+    "Bandwidth limit in Mbps (20-10000).": "带宽上限，单位 Mbps（20–10000）。",
+    "Billing type: Month or Year.": "计费方式：Month 或 Year。",
+    "Quote and show the request without purchasing bandwidth.": (
+        "仅询价并显示请求，不购买独享带宽。"
+    ),
+    "Dedicated bandwidth ID.": "独享带宽 ID。",
+    "Target bandwidth limit in Mbps (20-10000).": "目标带宽上限，单位 Mbps（20–10000）。",
+    "Quote and show the request without changing bandwidth.": (
+        "仅询价并显示请求，不修改独享带宽。"
+    ),
+    "Quote and show the request without deleting bandwidth.": (
+        "仅询价并显示请求，不删除独享带宽。"
+    ),
+    "Target bandwidth: dedicated or shared.": "目标带宽：dedicated 或 shared。",
+    "--charge must be Month or Year.": "--charge 必须是 Month 或 Year。",
+    "--to must be dedicated or shared.": "--to 必须是 dedicated 或 shared。",
+    "Refund {amount} CNY": "预计退还 {amount} 元",
+    "Payment {amount} CNY": "需支付 {amount} 元",
+    "Migrate bound EIPs to shared bandwidth, then delete": ("将已绑定 EIP 迁移到共享带宽后删除"),
+    "The API returned no result for instance {instance}.": (
+        "API 未返回实例 {instance} 的操作结果。"
+    ),
+    "Some bandwidth switches failed.": "部分带宽切换失败。",
+    "dedicated": "独享带宽",
+    "shared": "共享带宽",
+    "blocked": "已拦截",
+    "Manage MiniMax H3 video tasks.": "管理 MiniMax H3 视频任务。",
+    "Create a MiniMax H3 video task.": "创建 MiniMax H3 视频任务。",
+    "Show a MiniMax H3 video task.": "查看 MiniMax H3 视频任务。",
+    "List MiniMax H3 video tasks.": "列出 MiniMax H3 视频任务。",
+    "List MiniMax H3 point packages.": "列出 MiniMax H3 积分套餐包。",
+    "Show the MiniMax H3 point balance.": "查看 MiniMax H3 积分余额。",
+    "Cancel an unfinished MiniMax H3 video task.": "取消尚未结束的 MiniMax H3 视频任务。",
+    "Video prompt; at most 5000 characters.": "视频提示词，最多 5000 个字符。",
+    "Output resolution: 768P, 1080P, or 2K.": "输出分辨率：768P、1080P 或 2K。",
+    "Video duration in seconds (4-15).": "视频时长秒数（4–15）。",
+    "Output ratio or adaptive for media input.": "输出宽高比；素材输入可使用 adaptive。",
+    "Public first-frame image URL.": "可公开访问的首帧图片 URL。",
+    "Public last-frame image URL.": "可公开访问的尾帧图片 URL。",
+    "Public reference image URL; repeatable.": "可公开访问的参考图片 URL，可重复指定。",
+    "Public reference video URL; repeatable.": "可公开访问的参考视频 URL，可重复指定。",
+    "Public reference audio URL; repeatable.": "可公开访问的参考音频 URL，可重复指定。",
+    "Enable Context-IR prompt optimization.": "启用 Context-IR 提示词优化。",
+    "Public task callback URL.": "可公开访问的任务回调 URL。",
+    "Idempotency key; generated automatically when omitted.": "幂等键；省略时自动生成。",
+    "Show the request without creating a video task.": "仅显示请求，不创建视频任务。",
+    "Video task ID.": "视频任务 ID。",
+    "Page number starting at 1.": "页码，从 1 开始。",
+    "Results per page (1-100).": "每页结果数（1–100）。",
+    "Filter by task status.": "按任务状态筛选。",
+    "Set {environment} to a MiniMax H3 API key.": (
+        "请将 {environment} 设置为 MiniMax H3 API Key。"
+    ),
+    "{environment} must contain an sk-ml- API key.": (
+        "{environment} 必须是以 sk-ml- 开头的 API Key。"
+    ),
+    "MiniMax H3 API rejected the request with HTTP {status}.": (
+        "MiniMax H3 API 拒绝了请求，HTTP 状态码为 {status}。"
+    ),
+    "Unable to reach the MiniMax H3 API.": "无法连接 MiniMax H3 API。",
+    "MiniMax H3 API returned an invalid response.": "MiniMax H3 API 返回了无效响应。",
+    "MiniMax H3 API rejected the request.": "MiniMax H3 API 拒绝了请求。",
+    "Prompt cannot be empty.": "提示词不能为空。",
+    "Prompt cannot exceed 5000 characters.": "提示词不能超过 5000 个字符。",
+    "--last-frame requires --first-frame.": "--last-frame 需要同时指定 --first-frame。",
+    "Frame inputs cannot be combined with reference inputs.": (
+        "首尾帧素材不能与参考图片、视频或音频混用。"
+    ),
+    "{option} may be specified at most {maximum} times.": ("{option} 最多可指定 {maximum} 次。"),
+    "--resolution must be 768P, 1080P, or 2K.": ("--resolution 必须是 768P、1080P 或 2K。"),
+    "Unsupported video ratio: {ratio}.": "不支持的视频宽高比：{ratio}。",
+    "Pure text video generation requires a non-adaptive ratio.": (
+        "纯文生视频必须指定非 adaptive 的宽高比。"
+    ),
+    "Idempotency key cannot be empty.": "幂等键不能为空。",
+    "Unsupported task status: {status}.": "不支持的任务状态：{status}。",
+    "Video task": "视频任务",
+    "Point balance": "积分余额",
     "Manage durable remote instance jobs.": "管理可断线恢复的实例远程任务。",
     "Submit a durable remote job and return immediately.": "提交持久化远程任务并立即返回。",
     "List durable remote jobs on an instance.": "列出实例上的持久化远程任务。",
@@ -424,6 +514,34 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "REFUND": "退款",
     "CODE": "代码",
     "MESSAGE": "信息",
+    "BANDWIDTH ID": "独享带宽 ID",
+    "BANDWIDTH (Mbps)": "带宽（Mbps）",
+    "BANDWIDTH": "带宽",
+    "TARGET BANDWIDTH": "目标带宽",
+    "BANDWIDTH SCOPE": "带宽归属",
+    "PUBLIC IP": "公网 IP",
+    "EIP ID": "EIP ID",
+    "EIPS": "EIP 数量",
+    "CAN SWITCH": "可切换",
+    "EXPIRES": "到期时间",
+    "QUANTITY": "购买时长",
+    "MIGRATED EIPS": "已迁移 EIP",
+    "TARGET": "目标",
+    "SUCCESS": "成功",
+    "TASK ID": "任务 ID",
+    "PACKAGE ID": "套餐包 ID",
+    "MODEL": "模型",
+    "RESOLUTION": "分辨率",
+    "DURATION": "时长",
+    "RATIO": "宽高比",
+    "REMAINING (s)": "预计剩余（秒）",
+    "TOTAL POINTS": "总积分",
+    "RESERVED POINTS": "预占积分",
+    "AVAILABLE POINTS": "可用积分",
+    "IDEMPOTENCY KEY": "幂等键",
+    "PROMPT": "提示词",
+    "URL": "URL",
+    "ERROR": "错误",
     "PATH": "路径",
     "TAG": "标签",
     "SIZE": "大小",

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from compshare_cli.actions import (
+    BANDWIDTH_ACTIONS,
     COMING_SOON_ACTIONS,
     IMAGE_ACTIONS,
     INSTANCE_ACTIONS,
@@ -19,7 +20,8 @@ def test_public_action_counts() -> None:
     assert len(IMAGE_ACTIONS) == 16
     assert len(STORAGE_ACTIONS) == 8
     assert len(TEAM_ACTIONS) == 17
-    assert len(PUBLIC_ACTIONS) == 68
+    assert len(BANDWIDTH_ACTIONS) == 8
+    assert len(PUBLIC_ACTIONS) == 76
 
 
 def test_every_available_public_action_is_wired_into_a_command() -> None:
@@ -47,11 +49,11 @@ def test_coming_soon_actions_are_public() -> None:
     ],
 )
 def test_action_registry_matches_local_public_docs(directory: str, expected: frozenset) -> None:
-    docs = Path(__file__).parents[2] / "compshare-docs" / "pages" / "gpus" / directory
+    docs = Path(__file__).parents[2] / "compshare-docs" / "content" / "gpus" / directory
     if not docs.exists():
         pytest.skip("sibling compshare-docs checkout is not available")
     documented = set()
-    for path in docs.glob("*.md"):
+    for path in docs.glob("*.md*"):
         match = re.search(r"^#\s+([A-Za-z][A-Za-z0-9]+)\s+", path.read_text(encoding="utf-8"), re.M)
         if match and match.group(1) != "US3CLI":
             documented.add(match.group(1))

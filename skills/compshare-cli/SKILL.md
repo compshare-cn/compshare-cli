@@ -1,11 +1,11 @@
 ---
 name: compshare-cli
-description: Manage CompShare GPU cloud resources through the compshare CLI. Use when Codex needs to install or configure compshare-cli, search GPU specifications and inventory, inspect pricing, create or manage instances, connect over SSH, transfer files, run durable remote jobs, manage images, disks, US3, teams or billing, ask product questions, or diagnose CLI problems.
+description: Manage CompShare GPU cloud resources and MiniMax H3 video tasks through the compshare CLI. Use when Codex needs to install or configure compshare-cli, search GPU specifications and inventory, inspect pricing, create or manage instances, connect over SSH, transfer files, run durable remote jobs, manage images, disks, US3, teams or billing, create or inspect MiniMax H3 videos, ask product questions, or diagnose CLI problems.
 ---
 
 # CompShare CLI
 
-Manage CompShare GPU compute from the terminal with the `compshare` command.
+Manage CompShare GPU compute and MiniMax H3 from the terminal with the `compshare` command.
 
 ## Operating rules
 
@@ -39,6 +39,12 @@ For non-interactive environments, provide credentials through the process enviro
 export COMPSHARE_PUBLIC_KEY='...'
 export COMPSHARE_PRIVATE_KEY='...'
 compshare --json doctor
+```
+
+MiniMax H3 uses a separate model API key:
+
+```bash
+export COMPSHARE_MINIMAX_API_KEY='sk-ml-...'
 ```
 
 Select a named profile with `--profile NAME`. Use `compshare config path` to locate the configuration file and `compshare config use NAME` to change the default profile.
@@ -212,6 +218,45 @@ compshare --json instance job prune INSTANCE_ID --older-than 7d --yes
 
 A job wait timeout does not cancel the remote job. Query its state before submitting replacement work.
 
+## Dedicated bandwidth
+
+List dedicated bandwidth resources and inspect instance EIP assignments:
+
+```bash
+compshare --json bandwidth list
+compshare --json bandwidth instances
+```
+
+Purchase, resize or delete only after reviewing the corresponding dry run. Prices are returned
+in cents by the API, while human output renders CNY:
+
+```bash
+compshare --json bandwidth create \
+  --region cn-wlcb --zone cn-wlcb-01 \
+  --bandwidth 100 --charge Month --quantity 1 --dry-run
+compshare --json bandwidth create \
+  --region cn-wlcb --zone cn-wlcb-01 \
+  --bandwidth 100 --charge Month --quantity 1 --yes
+
+compshare --json bandwidth resize BANDWIDTH_ID \
+  --region cn-wlcb --zone cn-wlcb-01 --bandwidth 200 --dry-run
+compshare --json bandwidth delete BANDWIDTH_ID \
+  --region cn-wlcb --zone cn-wlcb-01 --dry-run
+```
+
+Switch one or more instance EIPs without supplying locations; the CLI resolves and groups them by
+availability zone:
+
+```bash
+compshare --json bandwidth switch INSTANCE_1 INSTANCE_2 --to dedicated --yes
+compshare --json bandwidth switch INSTANCE_1 --to shared --yes
+```
+
+Dedicated bandwidth is available only in supported UCloud availability zones. Each account can
+purchase at most one per zone. Existing instances do not switch automatically after purchase;
+new instances in that zone use it by default. Deleting migrates bound EIPs back to shared
+bandwidth before releasing the resource.
+
 ## Images, storage and teams
 
 Discover subcommands first, then inspect the exact operation:
@@ -220,6 +265,7 @@ Discover subcommands first, then inspect the exact operation:
 compshare --json image --help
 compshare --json storage --help
 compshare --json storage disk --help
+compshare --json bandwidth --help
 compshare --json team --help
 ```
 
@@ -234,6 +280,42 @@ team invite/member/quota/billing
 ```
 
 Treat image deletion, disk deletion, disk detach/resize, quota changes and team mutations as state-changing operations. Read the current resource and request confirmation before adding `--yes` where supported.
+
+## MiniMax H3 video tasks
+
+Inspect points and existing work before creating a task:
+
+```bash
+compshare --json minimax points
+compshare --json minimax packages
+compshare --json minimax list --status running
+compshare --json minimax show TASK_ID
+```
+
+Preview the request, then create only after approval. Reuse an explicit idempotency key when
+retrying an uncertain request:
+
+```bash
+compshare --json minimax create 'A sailboat crossing a golden sea' \
+  --resolution 1080P --duration 5 --ratio 16:9 \
+  --idempotency-key VIDEO_REQUEST_ID --dry-run
+compshare --json minimax create 'A sailboat crossing a golden sea' \
+  --resolution 1080P --duration 5 --ratio 16:9 \
+  --idempotency-key VIDEO_REQUEST_ID --yes
+```
+
+Use `--first-frame` and `--last-frame` for frame-driven video, or repeat
+`--reference-image`, `--reference-video` and `--reference-audio` for reference-driven video.
+All media inputs must be publicly accessible URLs. For callbacks, pass `--callback-url` and set
+`COMPSHARE_MINIMAX_CALLBACK_TOKEN` if the receiver validates a token.
+Generated video URLs stay redacted unless the user explicitly needs them and `--show-sensitive`
+is added as a root option.
+
+Cancellation reads the current task before submitting the request:
+
+```bash
+compshare --json minimax cancel TASK_ID --yes
+```
 
 ## Product questions and diagnostics
 

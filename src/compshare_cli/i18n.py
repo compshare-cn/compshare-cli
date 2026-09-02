@@ -79,7 +79,7 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "List MiniMax H3 point packages.": "列出 MiniMax H3 积分套餐包。",
     "Show the MiniMax H3 point balance.": "查看 MiniMax H3 积分余额。",
     "Cancel an unfinished MiniMax H3 video task.": "取消尚未结束的 MiniMax H3 视频任务。",
-    "Video prompt; at most 5000 characters.": "视频提示词，最多 5000 个字符。",
+    "Video prompt; at most 7000 characters.": "视频提示词，最多 7000 个字符。",
     "Output resolution: 768P, 1080P, or 2K.": "输出分辨率：768P、1080P 或 2K。",
     "Video duration in seconds (4-15).": "视频时长秒数（4–15）。",
     "Output ratio or adaptive for media input.": "输出宽高比；素材输入可使用 adaptive。",
@@ -109,7 +109,7 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "MiniMax H3 API returned an invalid response.": "MiniMax H3 API 返回了无效响应。",
     "MiniMax H3 API rejected the request.": "MiniMax H3 API 拒绝了请求。",
     "Prompt cannot be empty.": "提示词不能为空。",
-    "Prompt cannot exceed 5000 characters.": "提示词不能超过 5000 个字符。",
+    "Prompt cannot exceed 7000 characters.": "提示词不能超过 7000 个字符。",
     "--last-frame requires --first-frame.": "--last-frame 需要同时指定 --first-frame。",
     "Frame inputs cannot be combined with reference inputs.": (
         "首尾帧素材不能与参考图片、视频或音频混用。"

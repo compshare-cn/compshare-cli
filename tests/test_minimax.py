@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from compshare_cli import cli
 from compshare_cli.commands import minimax
+from compshare_cli.errors import UsageError
 
 runner = CliRunner()
 
@@ -96,6 +97,15 @@ def test_create_posts_content_with_auth_and_idempotency(monkeypatch) -> None:
         "aigc_watermark": False,
         "use_context_ir": True,
     }
+
+
+def test_prompt_length_boundary() -> None:
+    prompt = "a" * 7000
+    assert minimax._content(prompt, None, None, [], [], []) == [
+        {"type": "text", "text": prompt}
+    ]
+    with pytest.raises(UsageError, match="7000"):
+        minimax._content(f"{prompt}a", None, None, [], [], [])
 
 
 def test_create_dry_run_needs_no_key_and_does_not_call_api(monkeypatch) -> None:

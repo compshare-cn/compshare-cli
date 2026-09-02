@@ -179,8 +179,8 @@ def _content(
     text = prompt.strip()
     if not text:
         raise UsageError(tr("Prompt cannot be empty."))
-    if len(text) > 5000:
-        raise UsageError(tr("Prompt cannot exceed 5000 characters."))
+    if len(text) > 7000:
+        raise UsageError(tr("Prompt cannot exceed 7000 characters."))
     if last_frame and not first_frame:
         raise UsageError(tr("--last-frame requires --first-frame."))
     if (first_frame or last_frame) and (reference_images or reference_videos or reference_audio):
@@ -234,7 +234,7 @@ def _task_path(task_id: str, *, query: bool) -> str:
 @app.command("create", help="Create a MiniMax H3 video task.")
 def create(
     ctx: typer.Context,
-    prompt: str = typer.Argument(..., help="Video prompt; at most 5000 characters."),
+    prompt: str = typer.Argument(..., help="Video prompt; at most 7000 characters."),
     resolution: str = typer.Option("768P", help="Output resolution: 768P, 1080P, or 2K."),
     duration: int = typer.Option(5, min=4, max=15, help="Video duration in seconds (4-15)."),
     ratio: str = typer.Option("16:9", help="Output ratio or adaptive for media input."),

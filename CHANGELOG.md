@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.4.4
+
+- 新增 WorkBuddy `MCP + Skill` Token 连接器，通过本地 stdio MCP 安全注入 API 公钥/私钥，
+  并区分只读、预演和需用户明确确认的写操作。
+
 ## 0.4.3
 
 - 修复 Typer 0.27.2 环境中 CLI 启动时无法导入 `Abort` 的问题。

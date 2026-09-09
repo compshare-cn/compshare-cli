@@ -90,6 +90,23 @@ npx skills add compshare-cn/compshare-cli --skill compshare-cli
 
 完整说明见 [CompShare CLI Skill](skills/compshare-cli/SKILL.md)。
 
+## WorkBuddy Connector
+
+仓库内置符合 WorkBuddy 规范的 `MCP + Skill` Token 连接器，提交目录为
+[`connector/compshare`](connector/compshare)。用户在 WorkBuddy 表单中填写 API 公钥和
+私钥后，连接器通过本地 stdio MCP 注入凭证，不需要 OAuth，也不会修改已有 CLI 配置。
+
+WorkBuddy 配置固定使用 Python 3.11；本地开发需 Python 3.10 或更高版本，可安装 MCP 可选
+依赖并启动服务：
+
+```bash
+pip install -e '.[mcp]'
+compshare-mcp
+```
+
+正式 Connector 使用 `uvx` 从 PyPI 安装固定版本，并将只读、预演和需要明确确认的写操作
+分开暴露。MiniMax H3 使用表单中可选的独立模型 API Key。
+
 ## SDK
 
 如需通过 SDK 集成 CompShare API，可参考独立的

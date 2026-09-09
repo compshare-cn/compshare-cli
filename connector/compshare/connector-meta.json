@@ -1,0 +1,25 @@
+{
+  "name": "CompShare",
+  "name_zh": "优云智算",
+  "name_en": "CompShare",
+  "description": "Manage CompShare GPU instances, images, storage, networking, teams, and MiniMax H3 tasks.",
+  "description_zh": "连接优云智算账户，查询和管理 GPU 实例、镜像、存储、网络、团队及 MiniMax H3 视频任务。",
+  "description_en": "Manage CompShare GPU instances, images, storage, networking, teams, and MiniMax H3 tasks.",
+  "source": "compshare",
+  "type": "mcp",
+  "auth_mode": "token",
+  "version": "0.4.4",
+  "minWorkbuddyVersion": "5.0.0",
+  "examples_zh": [
+    "查询上海可用的 RTX 4090 GPU 规格、库存和价格",
+    "列出我所有运行中的 GPU 实例",
+    "先预演一台单卡 4090 实例的创建方案",
+    "查看 MiniMax H3 积分余额和正在运行的视频任务"
+  ],
+  "examples_en": [
+    "Find available RTX 4090 GPU specifications and prices in Shanghai",
+    "List all of my running GPU instances",
+    "Preview a one-GPU 4090 instance before creating it",
+    "Show my MiniMax H3 point balance and running video tasks"
+  ]
+}

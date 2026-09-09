@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CompShare">
+  <defs>
+    <linearGradient id="top" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b8c1ff"/>
+      <stop offset="1" stop-color="#7372ff"/>
+    </linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#dbe0ff"/>
+      <stop offset="1" stop-color="#7585ff"/>
+    </linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b5cff"/>
+      <stop offset="1" stop-color="#3329ec"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <path fill="url(#top)" d="M32 4 45 11.5 32 19 19 11.5Z"/>
+    <path fill="url(#left)" d="M19 11.5 32 19v14L19 25.5Z"/>
+    <path fill="url(#right)" d="M32 19 45 11.5v14L32 33Z"/>
+  </g>
+  <g transform="translate(-12 25)">
+    <path fill="url(#top)" d="M32 4 45 11.5 32 19 19 11.5Z"/>
+    <path fill="url(#left)" d="M19 11.5 32 19v14L19 25.5Z"/>
+    <path fill="url(#right)" d="M32 19 45 11.5v14L32 33Z"/>
+  </g>
+  <g transform="translate(12 25)">
+    <path fill="url(#top)" d="M32 4 45 11.5 32 19 19 11.5Z"/>
+    <path fill="url(#left)" d="M19 11.5 32 19v14L19 25.5Z"/>
+    <path fill="url(#right)" d="M32 19 45 11.5v14L32 33Z"/>
+  </g>
+  <path fill="#fff" d="m28 27.2 10 5.8-10 5.8Z"/>
+</svg>

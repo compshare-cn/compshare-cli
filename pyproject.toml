@@ -34,9 +34,13 @@ dev = [
   "pytest-cov>=5,<8",
   "ruff>=0.6,<1",
 ]
+mcp = [
+  "mcp>=2.2,<3",
+]
 
 [project.scripts]
 compshare = "compshare_cli.cli:main"
+compshare-mcp = "compshare_cli.mcp_server:main"
 compshare-ssh-askpass = "compshare_cli.ssh:askpass"
 
 [tool.setuptools.dynamic]

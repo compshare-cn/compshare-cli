@@ -1,0 +1,4 @@
+include CHANGELOG.md
+include RELEASING.md
+recursive-include connector/compshare *.json *.md *.svg
+recursive-include skills *.md *.yaml

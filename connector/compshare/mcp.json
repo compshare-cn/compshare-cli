@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "compshare": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--python",
+        "3.11",
+        "--from",
+        "compshare-cli[mcp]==0.4.4",
+        "compshare-mcp"
+      ],
+      "env": {
+        "COMPSHARE_PUBLIC_KEY": "${COMPSHARE_PUBLIC_KEY}",
+        "COMPSHARE_PRIVATE_KEY": "${COMPSHARE_PRIVATE_KEY}",
+        "COMPSHARE_MINIMAX_API_KEY": "${COMPSHARE_MINIMAX_API_KEY}"
+      },
+      "runtime": {
+        "type": "node",
+        "version": "20"
+      },
+      "timeout": 60000
+    }
+  }
+}

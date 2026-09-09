@@ -1,0 +1,44 @@
+{
+  "title": "连接优云智算账户",
+  "title_en": "Connect CompShare",
+  "description": "API 密钥仅由 WorkBuddy 保存在本机 ~/.workbuddy，并在连接时注入本地 MCP 进程，不会上传到 WorkBuddy 云端。连接器不会修改已有的 CompShare CLI 凭证配置。",
+  "description_en": "API keys are stored locally by WorkBuddy under ~/.workbuddy and injected only into the local MCP process. They are not uploaded to WorkBuddy cloud, and the connector does not change existing CompShare CLI credentials.",
+  "docUrl": "https://console.compshare.cn/uaccount/api_manage",
+  "docLabel": "前往账户中心获取 API 公钥和私钥",
+  "docLabel_en": "Get API public and private keys from Account Center",
+  "fields": [
+    {
+      "key": "COMPSHARE_PUBLIC_KEY",
+      "label": "API 公钥",
+      "label_en": "API Public Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "账户中心 → API 密钥 → 公钥",
+      "placeholder_en": "Account Center -> API Keys -> Public Key",
+      "description": "用于签名访问 GPU、镜像、存储、网络和团队 OpenAPI。请勿在对话中发送该密钥。",
+      "description_en": "Signs GPU, image, storage, networking, and team OpenAPI requests. Never send this key in chat."
+    },
+    {
+      "key": "COMPSHARE_PRIVATE_KEY",
+      "label": "API 私钥",
+      "label_en": "API Private Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "账户中心 → API 密钥 → 私钥",
+      "placeholder_en": "Account Center -> API Keys -> Private Key",
+      "description": "与 API 公钥配对用于请求签名。仅保存在 WorkBuddy 本机凭证区。",
+      "description_en": "Pairs with the public key to sign requests and remains in WorkBuddy's local credential store."
+    },
+    {
+      "key": "COMPSHARE_MINIMAX_API_KEY",
+      "label": "MiniMax H3 API Key（可选）",
+      "label_en": "MiniMax H3 API Key (optional)",
+      "type": "password",
+      "required": false,
+      "placeholder": "模型 API 服务 → API KEY（sk-ml-...）",
+      "placeholder_en": "Model API Service -> API KEY (sk-ml-...)",
+      "description": "仅在通过连接器创建或管理 MiniMax H3 视频任务时需要。",
+      "description_en": "Required only for creating or managing MiniMax H3 video tasks through this connector."
+    }
+  ]
+}

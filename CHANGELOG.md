@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.3
+
+- 修复 Typer 0.27.2 环境中 CLI 启动时无法导入 `Abort` 的问题。
+
 ## 0.4.2
 
 - 移除 `compshare ask` 产品知识问答功能。

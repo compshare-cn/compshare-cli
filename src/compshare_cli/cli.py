@@ -24,7 +24,7 @@ from compshare_cli.runtime import Runtime
 _TYPER_CLICK = getattr(typer_core, "_click", click)
 _TYPER_CLICK_EXCEPTIONS = getattr(_TYPER_CLICK, "exceptions", _TYPER_CLICK)
 _CLICK_EXCEPTIONS = (click.ClickException, _TYPER_CLICK_EXCEPTIONS.ClickException)
-_ABORT_EXCEPTIONS = (click.Abort, _TYPER_CLICK_EXCEPTIONS.Abort)
+_ABORT_EXCEPTIONS = (click.Abort, getattr(_TYPER_CLICK_EXCEPTIONS, "Abort", click.Abort))
 _GROUP_TYPES = (click.Group, typer_core.TyperGroup)
 _OPTION_TYPES = (click.Option, typer_core.TyperOption)
 _ARGUMENT_TYPES = (click.Argument, typer_core.TyperArgument)

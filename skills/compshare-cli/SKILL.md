@@ -1,6 +1,6 @@
 ---
 name: compshare-cli
-description: Manage CompShare GPU cloud resources and MiniMax H3 video tasks through the compshare CLI. Use when Codex needs to install or configure compshare-cli, search GPU specifications and inventory, inspect pricing, create or manage instances, connect over SSH, transfer files, run durable remote jobs, manage images, disks, US3, teams or billing, create or inspect MiniMax H3 videos, ask product questions, or diagnose CLI problems.
+description: Manage CompShare GPU cloud resources and MiniMax H3 video tasks through the compshare CLI. Use when Codex needs to install or configure compshare-cli, search GPU specifications and inventory, inspect pricing, create or manage instances, connect over SSH, transfer files, run durable remote jobs, manage images, disks, US3, teams or billing, create or inspect MiniMax H3 videos, or diagnose CLI problems.
 ---
 
 # CompShare CLI
@@ -317,15 +317,14 @@ Cancellation reads the current task before submitting the request:
 compshare --json minimax cancel TASK_ID --yes
 ```
 
-## Product questions and diagnostics
+## Diagnostics and feedback
 
 ```bash
-compshare --json ask '按量实例关机以后，云硬盘还收费吗？'
 compshare --json doctor
 compshare feedback bug '创建实例时发生错误'
 ```
 
-Use `ask` for CompShare product usage and billing questions. Use `doctor` for local configuration, authentication, network and SSH environment checks. Use `feedback` only when the user asks to send feedback; it performs an external write.
+Use `doctor` for local configuration, authentication, network and SSH environment checks. Use `feedback` only when the user asks to send feedback; it performs an external write.
 
 ## JSON contract
 

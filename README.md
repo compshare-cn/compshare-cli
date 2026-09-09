@@ -9,7 +9,6 @@
 - 支持独享带宽询价、购买、改配、退款预估及实例 EIP 切换
 - 支持创建、查询和取消 MiniMax H3 视频任务，并查看积分套餐包与余额
 - 默认中文帮助，可切换英文；所有命令支持 JSON 输出
-- 可通过 `compshare ask` 查询产品使用和计费知识
 - 可通过 `compshare feedback` 反馈 CLI 问题和建议
 
 ## 安装
@@ -73,7 +72,6 @@ compshare instance -h
 compshare config     API 凭证配置
 compshare feedback   反馈 CLI 问题或建议
 compshare doctor     配置、鉴权、网络与 SSH 环境诊断
-compshare ask        产品使用和计费问答
 compshare instance   GPU 实例、规格、库存、价格和生命周期
 compshare image      平台、自定义、社区及共享镜像
 compshare storage    云盘和 US3 挂载

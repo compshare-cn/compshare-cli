@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.2
+
+- 移除 `compshare ask` 产品知识问答功能。
+
 ## 0.4.1
 
 - 将 `minimax create` 的提示词长度上限从 5000 个字符调整为 7000 个字符。

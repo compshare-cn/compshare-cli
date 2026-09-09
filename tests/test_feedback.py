@@ -172,7 +172,6 @@ def test_event_worker_posts_to_event_endpoint(monkeypatch) -> None:
             "team.billing.export",
         ),
         (["--json", "--show-sensitive", "instance", "show", "uhost-1"], "instance.show"),
-        (["ask", "云硬盘还收费吗？"], "ask"),
         (["feedback", "suggest", "message"], "feedback"),
         (["instance", "--help"], None),
         ([], None),

@@ -101,9 +101,7 @@ def test_create_posts_content_with_auth_and_idempotency(monkeypatch) -> None:
 
 def test_prompt_length_boundary() -> None:
     prompt = "a" * 7000
-    assert minimax._content(prompt, None, None, [], [], []) == [
-        {"type": "text", "text": prompt}
-    ]
+    assert minimax._content(prompt, None, None, [], [], []) == [{"type": "text", "text": prompt}]
     with pytest.raises(UsageError, match="7000"):
         minimax._content(f"{prompt}a", None, None, [], [], [])
 

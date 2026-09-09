@@ -10,7 +10,6 @@ from typer.completion import completion_init, install_callback
 from typer.main import get_command
 
 from compshare_cli import __version__
-from compshare_cli.commands import ask as ask_command
 from compshare_cli.commands import bandwidth, image, instance, minimax, storage, team
 from compshare_cli.commands import doctor as doctor_command
 from compshare_cli.commands import feedback as feedback_command
@@ -306,14 +305,6 @@ def version(ctx: typer.Context) -> None:
 def doctor(ctx: typer.Context) -> None:
     """Diagnose the CLI configuration and environment."""
     doctor_command.run(ctx.find_root().obj)
-
-
-@app.command("ask", help="Ask a CompShare product question.")
-def ask(
-    ctx: typer.Context,
-    question: str = typer.Argument(..., help="Question to answer."),
-) -> None:
-    ask_command.run(ctx.find_root().obj, question)
 
 
 @app.command("feedback")

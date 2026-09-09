@@ -115,6 +115,7 @@ def test_root_help_lists_config_first(capsys) -> None:
     assert "--version" in help_text
     assert "--lang" in help_text
     assert "│ lang " not in help_text
+    assert "│ ask " not in help_text
     assert help_text.index("config") < help_text.index("feedback") < help_text.index("doctor")
 
 

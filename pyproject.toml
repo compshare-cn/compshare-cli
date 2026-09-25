@@ -23,10 +23,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/BennielAllan/compshare-cli"
-Repository = "https://github.com/BennielAllan/compshare-cli"
-Changelog = "https://github.com/BennielAllan/compshare-cli/blob/master/CHANGELOG.md"
-Issues = "https://github.com/BennielAllan/compshare-cli/issues"
+Homepage = "https://github.com/compshare-cn/compshare-cli"
+Repository = "https://github.com/compshare-cn/compshare-cli"
+Changelog = "https://github.com/compshare-cn/compshare-cli/blob/master/CHANGELOG.md"
+Issues = "https://github.com/compshare-cn/compshare-cli/issues"
 
 [project.optional-dependencies]
 dev = [

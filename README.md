@@ -1,13 +1,13 @@
 # CompShare CLI
 
-在终端管理优云智算 GPU 实例、镜像、云盘、US3 挂载、独享带宽、团队资源和 MiniMax H3 视频任务。
+在终端管理优云智算 GPU 实例、镜像、云盘、US3 挂载、独享带宽、团队资源和 MiniMax H3 视频、图片、语音任务。
 
 - 交互式创建实例，实时查询规格、库存和价格
 - 支持批量生命周期操作、等待状态和跨地域查询
 - 支持可断线恢复的远程任务、状态查询和增量日志读取
 - 支持社区/自定义镜像、云盘、团队额度与账单
 - 支持独享带宽询价、购买、改配、退款预估及实例 EIP 切换
-- 支持创建、查询和取消 MiniMax H3 视频任务，并查看积分套餐包与余额
+- 支持 MiniMax H3 视频、Qwen-Image 图片和 IndexTTS 2.5 语音任务，以及素材上传、视频 Skill 和积分查询
 - 默认中文帮助，可切换英文；所有命令支持 JSON 输出
 - 可通过 `compshare feedback` 反馈 CLI 问题和建议
 
@@ -61,6 +61,18 @@ compshare --json minimax create '一只猫在海边奔跑' --dry-run
 compshare --json minimax create '一只猫在海边奔跑' --yes
 compshare --json minimax points
 
+# 图片：查看价格、创建任务、查询结果
+compshare --json minimax image config
+compshare --json minimax image create '一只戴着宇航头盔的猫' --resolution 1K --dry-run
+compshare --json minimax image create '一只戴着宇航头盔的猫' --resolution 1K --yes
+compshare --json minimax image show TASK_ID
+
+# 语音：先查询可用音色，再创建任务
+compshare --json minimax audio pricing
+compshare --json minimax audio voices
+compshare --json minimax audio create '你好，欢迎使用优云智算。' --voice-id VOICE_ID --dry-run
+compshare --json minimax audio create '你好，欢迎使用优云智算。' --voice-id VOICE_ID --yes
+
 # 查看帮助
 compshare -h
 compshare instance -h
@@ -76,7 +88,7 @@ compshare instance   GPU 实例、规格、库存、价格和生命周期
 compshare image      平台、自定义、社区及共享镜像
 compshare storage    云盘和 US3 挂载
 compshare bandwidth  独享带宽和实例 EIP 带宽归属
-compshare minimax    MiniMax H3 视频任务和积分
+compshare minimax    MiniMax H3 视频、图片、语音、Skill 和积分
 compshare team       团队、邀请、成员额度、账单和审计
 ```
 

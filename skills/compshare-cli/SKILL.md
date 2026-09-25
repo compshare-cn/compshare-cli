@@ -1,6 +1,6 @@
 ---
 name: compshare-cli
-description: Manage CompShare GPU cloud resources and MiniMax H3 video tasks through the compshare CLI. Use when Codex needs to install or configure compshare-cli, search GPU specifications and inventory, inspect pricing, create or manage instances, connect over SSH, transfer files, run durable remote jobs, manage images, disks, US3, teams or billing, create or inspect MiniMax H3 videos, or diagnose CLI problems.
+description: Manage CompShare GPU cloud resources and MiniMax H3 video, image, and speech tasks through the compshare CLI. Use when Codex needs to install or configure compshare-cli, search GPU specifications and inventory, inspect pricing, create or manage instances, connect over SSH, transfer files, run durable remote jobs, manage images, disks, US3, teams or billing, create or inspect MiniMax H3 media, or diagnose CLI problems.
 ---
 
 # CompShare CLI
@@ -281,7 +281,7 @@ team invite/member/quota/billing
 
 Treat image deletion, disk deletion, disk detach/resize, quota changes and team mutations as state-changing operations. Read the current resource and request confirmation before adding `--yes` where supported.
 
-## MiniMax H3 video tasks
+## MiniMax H3 media tasks
 
 Inspect points and existing work before creating a task:
 
@@ -306,7 +306,9 @@ compshare --json minimax create 'A sailboat crossing a golden sea' \
 
 Use `--first-frame` and `--last-frame` for frame-driven video, or repeat
 `--reference-image`, `--reference-video` and `--reference-audio` for reference-driven video.
-All media inputs must be publicly accessible URLs. For callbacks, pass `--callback-url` and set
+Video supports 480P, 768P, 1080P, 2K and 4K and durations from 4 to 30 seconds. Use
+`minimax skill list` to find a Skill, then pass both `--context-ir` and `--skill-id`.
+Video inputs may use publicly accessible URLs or Data URLs. For callbacks, pass `--callback-url` and set
 `COMPSHARE_MINIMAX_CALLBACK_TOKEN` if the receiver validates a token.
 Generated video URLs stay redacted unless the user explicitly needs them and `--show-sensitive`
 is added as a root option.
@@ -316,6 +318,41 @@ Cancellation reads the current task before submitting the request:
 ```bash
 compshare --json minimax cancel TASK_ID --yes
 ```
+
+For images, inspect current pricing before creating a task. Each request creates one image:
+
+```bash
+compshare --json minimax image config
+compshare --json minimax image list --status queued
+compshare --json minimax image create 'A cat on the moon' --resolution 1K \
+  --idempotency-key IMAGE_REQUEST_ID --dry-run
+compshare --json minimax image create 'A cat on the moon' --resolution 1K \
+  --idempotency-key IMAGE_REQUEST_ID --yes
+compshare --json minimax image show TASK_ID
+```
+
+For reference images, `minimax image upload FILE --width PIXELS --height PIXELS --yes`
+returns an asset ID; repeat `--reference-asset ASSET_ID` when creating an image. Check the
+actual dimensions before upload because the API validates them.
+
+For speech, inspect pricing and voices before creating a task:
+
+```bash
+compshare --json minimax audio pricing
+compshare --json minimax audio voices --kind preset
+compshare --json minimax audio create 'Hello from CompShare.' --voice-id VOICE_ID \
+  --idempotency-key SPEECH_REQUEST_ID --dry-run
+compshare --json minimax audio create 'Hello from CompShare.' --voice-id VOICE_ID \
+  --idempotency-key SPEECH_REQUEST_ID --yes
+compshare --json minimax audio show TASK_ID
+```
+
+For an authorized reference recording, `minimax audio upload FILE --duration-ms MS --yes`
+returns an asset ID. Use `--voice-source asset --asset-id ASSET_ID`, or save it with
+`minimax audio voice-create ASSET_ID NAME --yes` and then use `--voice-source custom --voice-id VOICE_ID`.
+Generated image and speech URLs stay redacted unless the user explicitly needs them and
+`--show-sensitive` is added as a root option. Download speech output promptly; the API retains
+it for seven days. Deleting a finished task also removes its output.
 
 ## Diagnostics and feedback
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.0
+
+- 对齐 MiniMax H3 视频 API：支持 480P、4K、最长 30 秒、Skill、静音、水印和模型筛选，
+  并允许只传尾帧或仅用素材生成。
+- 新增 Qwen-Image 图片任务与 IndexTTS 2.5 语音任务命令，支持创建、查询、取消、删除、
+  参考素材上传与登记，以及图片价格、语音价格和音色管理。
+- 新增视频 Skill 查询、创建、更新和删除命令，并开放对应 MCP 读写分类。
+
 ## 0.4.4
 
 - 新增 WorkBuddy `MCP + Skill` Token 连接器，通过本地 stdio MCP 安全注入 API 公钥/私钥，

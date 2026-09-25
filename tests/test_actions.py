@@ -42,7 +42,7 @@ def test_coming_soon_actions_are_public() -> None:
 @pytest.mark.parametrize(
     ("directory", "expected"),
     [
-        ("instance", INSTANCE_ACTIONS),
+        ("instance", INSTANCE_ACTIONS | BANDWIDTH_ACTIONS),
         ("image", IMAGE_ACTIONS),
         ("data", STORAGE_ACTIONS),
         ("team", TEAM_ACTIONS),

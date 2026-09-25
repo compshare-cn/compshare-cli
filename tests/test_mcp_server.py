@@ -24,6 +24,9 @@ from compshare_cli.mcp_server import (
         ["instance", "job", "prune", "uhost-1", "--dry-run"],
         ["instance", "ssh", "uhost-1", "--print"],
         ["instance", "cp", "uhost-1", "local", ":/remote", "--print"],
+        ["minimax", "image", "create", "prompt", "--dry-run"],
+        ["minimax", "audio", "create", "text", "--voice-id", "voice-1", "--dry-run"],
+        ["minimax", "skill", "update", "skill-1", "name", "content", "--dry-run"],
     ],
 )
 def test_classifies_read_and_preview_commands(args) -> None:
@@ -38,6 +41,9 @@ def test_classifies_read_and_preview_commands(args) -> None:
         ["instance", "ssh", "uhost-1", "--", "nvidia-smi"],
         ["storage", "disk", "delete", "disk-1", "--yes"],
         ["minimax", "create", "prompt", "--yes"],
+        ["minimax", "image", "upload", "reference.png", "--width", "10", "--height", "10"],
+        ["minimax", "audio", "voice-delete", "voice-1", "--yes"],
+        ["minimax", "skill", "create", "name", "content", "--yes"],
     ],
 )
 def test_classifies_write_commands(args) -> None:

@@ -9,7 +9,7 @@ PyPI Trusted Publishing 自动上传。仓库不需要保存 PyPI Token。
 
 | 字段 | 值 |
 | --- | --- |
-| Owner | `BennielAllan` |
+| Owner | `compshare-cn` |
 | Repository | `compshare-cli` |
 | Workflow | `release.yml` |
 | Environment | `pypi` |

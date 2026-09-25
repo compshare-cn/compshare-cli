@@ -1,16 +1,16 @@
 ---
 name: compshare
-description: Manage CompShare GPU cloud resources and MiniMax H3 tasks through the controlled CompShare MCP bridge.
-description_zh: 通过受控 CompShare MCP 桥接查询和管理优云智算 GPU 云资源及 MiniMax H3 任务。
-description_en: Manage CompShare GPU cloud resources and MiniMax H3 tasks through the controlled CompShare MCP bridge.
-version: "0.4.4"
+description: Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the controlled CompShare MCP bridge.
+description_zh: 通过受控 CompShare MCP 桥接查询和管理优云智算 GPU 云资源及 MiniMax H3 视频、图片和语音任务。
+description_en: Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the controlled CompShare MCP bridge.
+version: "0.5.0"
 author: "CompShare"
 ---
 
 # CompShare 优云智算
 
 通过本 Connector 提供的 MCP 工具查询和管理 GPU 实例、镜像、云盘、US3、独享带宽、
-团队资源与 MiniMax H3 视频任务。凭证由 WorkBuddy Token 表单注入；不要要求用户在对话中
+团队资源与 MiniMax H3 视频、图片和语音任务。凭证由 WorkBuddy Token 表单注入；不要要求用户在对话中
 发送公钥、私钥或模型 API Key。
 
 本 Connector 不提供产品知识库问答。用户询问产品文档或政策时，不要猜测，也不要尝试调用
@@ -37,7 +37,7 @@ author: "CompShare"
 ### `compshare_status`
 
 检查 WorkBuddy 是否注入 GPU API 公钥/私钥、当前 CLI 版本和 API 连通性。`minimaxApiKey`
-为 `false` 只影响 MiniMax H3，不影响 GPU 资源。认证失败时，让用户在 Connector 设置中更新
+为 `false` 只影响 MiniMax H3 媒体任务，不影响 GPU 资源。认证失败时，让用户在 Connector 设置中更新
 凭证；不要改用 `compshare config`，也不要索取聊天中的明文密钥。
 
 ```json
@@ -161,12 +161,15 @@ JSON 创建至少提供 GPU、每实例 GPU 数、CPU、内存、镜像、Region
 MiniMax 使用 Token 表单中的独立 `COMPSHARE_MINIMAX_API_KEY`。缺失时让用户编辑 Connector
 凭证，不要把 GPU API 私钥当作模型 Key。
 
-创建前先读取积分、套餐、已有任务，再通过只读工具调用 `minimax create --dry-run`。展示
-分辨率、时长、比例、素材 URL 和费用影响后确认，使用相同幂等键调用写工具正式创建。
-重试不确定请求时必须复用原幂等键。取消未完成任务也属于写操作。
+视频创建前先读取积分、套餐、已有任务，再通过只读工具调用 `minimax create --dry-run`。
+图片先读取 `minimax image config`，语音先读取 `minimax audio pricing` 和
+`minimax audio voices`；再用相应的 `create --dry-run` 预演。展示分辨率、时长、比例、
+素材及费用影响后确认，使用相同幂等键调用写工具正式创建。重试不确定请求时必须复用
+原幂等键。取消、删除任务和上传参考素材也属于写操作。
 
-所有图片、视频和音频输入必须是公开可访问 URL。生成视频 URL 默认脱敏；不要为了显示它
-而绕过连接器的敏感输出限制。
+视频素材支持公开 URL 或 Data URL；图片和语音参考素材通过 `image upload`、
+`audio upload` 登记后使用资产 ID。生成结果 URL 默认脱敏；不要为了显示它而绕过连接器
+的敏感输出限制。
 
 ## 故障恢复
 

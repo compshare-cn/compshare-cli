@@ -37,8 +37,8 @@
       "required": false,
       "placeholder": "模型 API 服务 → API KEY（sk-ml-...）",
       "placeholder_en": "Model API Service -> API KEY (sk-ml-...)",
-      "description": "仅在通过连接器创建或管理 MiniMax H3 视频任务时需要。",
-      "description_en": "Required only for creating or managing MiniMax H3 video tasks through this connector."
+      "description": "仅在通过连接器创建或管理 MiniMax H3 视频、图片或语音任务时需要。",
+      "description_en": "Required only for creating or managing MiniMax H3 video, image, or speech tasks through this connector."
     }
   ]
 }

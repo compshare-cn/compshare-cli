@@ -106,6 +106,56 @@ def test_prompt_length_boundary() -> None:
         minimax._content(f"{prompt}a", None, None, [], [], [])
 
 
+def test_video_media_only_and_reference_limits() -> None:
+    assert minimax._content("", None, "https://example.com/last.png", [], [], []) == [
+        {
+            "type": "image_url",
+            "image_url": {"url": "https://example.com/last.png"},
+            "role": "last_frame",
+        }
+    ]
+    with pytest.raises(UsageError, match="12"):
+        minimax._content("prompt", None, None, ["image"] * 9, ["video"] * 3, ["audio"])
+    with pytest.raises(UsageError):
+        minimax._content("prompt", None, None, [], [], ["audio"])
+
+
+def test_video_new_options_follow_api_contract() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "minimax",
+            "create",
+            "prompt",
+            "--model",
+            "minimax-h3-lite",
+            "--resolution",
+            "4K",
+            "--duration",
+            "30",
+            "--context-ir",
+            "--skill-id",
+            "skill-1",
+            "--mute-audio",
+            "--watermark",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert _document(result.stdout)["data"]["request"] == {
+        "model": "minimax-h3-lite",
+        "content": [{"type": "text", "text": "prompt"}],
+        "resolution": "4K",
+        "duration": 30,
+        "ratio": "16:9",
+        "aigc_watermark": True,
+        "use_context_ir": True,
+        "skill_id": "skill-1",
+        "mute_audio": True,
+    }
+
+
 def test_create_dry_run_needs_no_key_and_does_not_call_api(monkeypatch) -> None:
     monkeypatch.delenv("COMPSHARE_MINIMAX_API_KEY")
     monkeypatch.setenv("COMPSHARE_MINIMAX_CALLBACK_TOKEN", "callback-secret")
@@ -231,8 +281,7 @@ def test_cancel_reads_status_before_delete(monkeypatch) -> None:
 @pytest.mark.parametrize(
     "args",
     [
-        ["create", "prompt", "--ratio", "adaptive", "--dry-run"],
-        ["create", "prompt", "--last-frame", "https://example.com/last.png", "--dry-run"],
+        ["create", "prompt", "--skill-id", "skill-1", "--dry-run"],
         [
             "create",
             "prompt",

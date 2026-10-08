@@ -141,6 +141,9 @@ compshare --json instance list --status Running --gpu 4090 --all
 compshare --json instance show INSTANCE_ID
 compshare --json instance show INSTANCE_ID --status --spec --billing
 
+# Query monitoring metrics and time series; locations are resolved automatically
+compshare --json instance monitor INSTANCE_1 INSTANCE_2
+
 # Batch lifecycle operations
 compshare --json instance start INSTANCE_1 INSTANCE_2 --timeout 600
 compshare --json instance stop INSTANCE_1 INSTANCE_2 --yes --timeout 600

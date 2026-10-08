@@ -23,6 +23,7 @@ _READ_COMMANDS = {
     ("instance", "families"),
     ("instance", "list"),
     ("instance", "show"),
+    ("instance", "monitor"),
     ("instance", "wait"),
     ("instance", "price"),
     ("instance", "resize-price"),

@@ -18,6 +18,7 @@ from compshare_cli.mcp_server import (
     "args",
     [
         ["instance", "list", "--all"],
+        ["instance", "monitor", "uhost-1"],
         ["team", "billing", "summary", "--team", "1"],
         ["instance", "create", "--dry-run"],
         ["instance", "resize", "uhost-1", "--dry-run"],

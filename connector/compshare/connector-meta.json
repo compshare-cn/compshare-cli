@@ -8,7 +8,7 @@
   "source": "compshare",
   "type": "mcp",
   "auth_mode": "token",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "minWorkbuddyVersion": "5.0.0",
   "examples_zh": [
     "查询上海可用的 RTX 4090 GPU 规格、库存和价格",

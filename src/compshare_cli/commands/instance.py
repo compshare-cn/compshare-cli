@@ -107,6 +107,15 @@ JOB_COLUMNS = (
     ("CreatedTime", "CREATED"),
 )
 
+MONITOR_METRIC_LABELS = {
+    "uhost_cpu_used": "CPU",
+    "cloudwatch_memory_usage": "MEMORY",
+    "cloudwatch_sys_disk_used_per": "SYSTEM DISK",
+    "cloudwatch_data_disk_used_per": "DATA DISKS",
+    "cloudwatch_gpu_memory_usage": "VRAM",
+    "cloudwatch_gpu_util": "GPU",
+}
+
 INSTANCE_SHOW_SECTION_KEYS = {
     "ip": ("IPSet",),
     "softwares": ("Softwares",),
@@ -183,6 +192,27 @@ def _instance_rows(response: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
         memory = row.get("Memory")
         row["MemoryDisplay"] = f"{memory // 1024}GiB" if isinstance(memory, int) else memory
         yield row
+
+
+def _monitor_rows(response: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
+    data = response.get("Data") or {}
+    for host in [*(data.get("List") or []), *(data.get("PodList") or [])]:
+        for metric in host.get("Metrics") or []:
+            metric_key = metric.get("MetricKey") or ""
+            for result in metric.get("Results") or [{}]:
+                latest = max(
+                    result.get("Values") or [],
+                    key=lambda point: point.get("Timestamp") or 0,
+                    default={},
+                )
+                tags = result.get("TagMap") or {}
+                yield {
+                    "UHostId": result.get("ResourceId") or host.get("UHostId") or host.get("PodId"),
+                    "MetricKey": tr(MONITOR_METRIC_LABELS.get(metric_key, metric_key)),
+                    "Value": latest.get("Value"),
+                    "Timestamp": latest.get("Timestamp"),
+                    "Device": tags.get("gpu_bus_id") or tags.get("mount") or tags.get("disk"),
+                }
 
 
 def _memory_display(value: Any) -> Any:
@@ -2183,6 +2213,48 @@ def refund(ctx: typer.Context, instances: List[str] = typer.Argument(...)) -> No
             ("Message", "MESSAGE"),
         ),
         json_list=True,
+    )
+
+
+@app.command("monitor", help="Get instance monitoring data.")
+def monitor(
+    ctx: typer.Context, instances: List[str] = typer.Argument(..., help="Instance IDs.")
+) -> None:
+    state = runtime(ctx)
+    requested = list(dict.fromkeys(instances))
+    locations, missing = _locate_instances(state, requested)
+    if missing:
+        raise UsageError(tr("Instance {instance} was not found.", instance=missing[0]))
+    groups: Dict[Tuple[str, str], List[str]] = {}
+    for identifier in requested:
+        region, zone, _ = locations[identifier]
+        groups.setdefault((region, zone), []).append(identifier)
+    response: Dict[str, Any] = {"Data": {"List": [], "PodList": []}}
+    for (region, zone), ids in groups.items():
+        for offset in range(0, len(ids), 10):
+            current = call(
+                state,
+                "GetCompShareInstanceMonitor",
+                {"Region": region, "Zone": zone, "UHostIds": ids[offset : offset + 10]},
+            )
+            data = current.get("Data") or {}
+            for key in ("List", "PodList"):
+                response["Data"][key].extend(data.get(key) or [])
+    rows = list(_monitor_rows(response))
+    renderer = Renderer(state.json_output, state.show_sensitive)
+    if not state.json_output and not rows:
+        renderer.console.print(tr("No monitoring data returned for the selected instances."))
+        return
+    renderer.data(
+        response,
+        rows=rows,
+        columns=(
+            ("UHostId", "INSTANCE"),
+            ("MetricKey", "METRIC"),
+            ("Value", "VALUE (%)"),
+            ("Timestamp", "TIME"),
+            ("Device", "DEVICE"),
+        ),
     )
 
 

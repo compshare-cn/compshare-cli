@@ -1375,7 +1375,7 @@ def test_schedule_extend_requires_an_active_plan(monkeypatch, capsys) -> None:
     assert "schedule set" in _json_error(capsys.readouterr().out)["message"]
 
 
-def test_unavailable_instance_commands_are_not_exposed() -> None:
+def test_monitor_and_focused_instance_commands_are_exposed() -> None:
     instance_help = runner.invoke(cli.app, ["instance", "--help"])
     software_help = runner.invoke(cli.app, ["instance", "software", "--help"])
     show_help = runner.invoke(cli.app, ["instance", "show", "--help"])
@@ -1383,7 +1383,7 @@ def test_unavailable_instance_commands_are_not_exposed() -> None:
     assert instance_help.exit_code == 0, instance_help.output
     assert software_help.exit_code == 0, software_help.output
     assert show_help.exit_code == 0, show_help.output
-    assert "monitor" not in instance_help.stdout
+    assert "monitor" in instance_help.stdout
     assert "url" not in software_help.stdout
     for option in (
         "--ip",
@@ -1396,6 +1396,184 @@ def test_unavailable_instance_commands_are_not_exposed() -> None:
     ):
         assert option in show_help.stdout
     assert "--connection" not in show_help.stdout
+
+
+def test_monitor_groups_locations_chunks_requests_and_preserves_series(monkeypatch) -> None:
+    ids = [f"uhost-{index}" for index in range(13)]
+    calls = []
+    hosts = [
+        {
+            "UHostId": identifier,
+            "Region": "cn-wlcb" if index < 11 else "cn-sh2",
+            "Zone": "cn-wlcb-01" if index < 11 else "cn-sh2-02",
+        }
+        for index, identifier in enumerate(ids)
+    ]
+    monkeypatch.setattr(instance, "collect_pages", lambda *args, **kwargs: {"UHostSet": hosts})
+
+    def call(state, action, params):
+        assert action == "GetCompShareInstanceMonitor"
+        calls.append(params)
+        return {
+            "Data": {
+                "List": [
+                    {
+                        "UHostId": identifier,
+                        "Metrics": [
+                            {
+                                "MetricKey": "uhost_cpu_used",
+                                "Results": [
+                                    {
+                                        "Values": [
+                                            {"Timestamp": 100, "Value": 0},
+                                            {"Timestamp": 99, "Value": 10},
+                                        ]
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                    for identifier in params["UHostIds"]
+                ],
+                "PodList": None,
+            }
+        }
+
+    monkeypatch.setattr(instance, "call", call)
+    result = runner.invoke(cli.app, ["--json", "instance", "monitor", *ids, ids[0]])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        {"Region": "cn-wlcb", "Zone": "cn-wlcb-01", "UHostIds": ids[:10]},
+        {"Region": "cn-wlcb", "Zone": "cn-wlcb-01", "UHostIds": ids[10:11]},
+        {"Region": "cn-sh2", "Zone": "cn-sh2-02", "UHostIds": ids[11:]},
+    ]
+    data = _json_data(result.stdout)["Data"]
+    assert [host["UHostId"] for host in data["List"]] == ids
+    assert data["PodList"] == []
+    assert data["List"][0]["Metrics"][0]["Results"][0]["Values"] == [
+        {"Timestamp": 100, "Value": 0},
+        {"Timestamp": 99, "Value": 10},
+    ]
+
+
+def test_monitor_rows_keep_per_device_latest_samples_and_missing_values() -> None:
+    response = {
+        "Data": {
+            "List": [
+                {
+                    "UHostId": "uhost-1",
+                    "Metrics": [
+                        {
+                            "MetricKey": "cloudwatch_gpu_util",
+                            "Results": [
+                                {
+                                    "TagMap": {"uuid": "long-id", "gpu_bus_id": "01:00.0"},
+                                    "Values": [
+                                        {"Timestamp": 200, "Value": 0},
+                                        {"Timestamp": 100, "Value": 80},
+                                    ],
+                                },
+                                {
+                                    "TagMap": {"gpu_bus_id": "02:00.0"},
+                                    "Values": [
+                                        {"Timestamp": 100, "Value": 5},
+                                        {"Timestamp": 200, "Value": 90},
+                                    ],
+                                },
+                            ],
+                        },
+                        {"MetricKey": "cloudwatch_memory_usage", "Results": None},
+                    ],
+                }
+            ],
+            "PodList": [
+                {
+                    "PodId": "pod-1",
+                    "Metrics": [
+                        {
+                            "MetricKey": "uhost_cpu_used",
+                            "Results": [{"ResourceId": "pod-1", "Values": []}],
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+    rows = list(instance._monitor_rows(response))
+
+    assert [(row["UHostId"], row["Value"], row["Timestamp"]) for row in rows] == [
+        ("uhost-1", 0, 200),
+        ("uhost-1", 90, 200),
+        ("uhost-1", None, None),
+        ("pod-1", None, None),
+    ]
+    assert rows[0]["Device"] == "01:00.0"
+    assert rows[1]["Device"] == "02:00.0"
+
+
+def test_monitor_human_output_distinguishes_metrics_and_devices(monkeypatch) -> None:
+    monkeypatch.setattr(
+        instance,
+        "_locate_instances",
+        lambda *args: ({"uhost-1": ("cn-wlcb", "cn-wlcb-01", {})}, []),
+    )
+    data = {
+        "Data": {
+            "List": [
+                {
+                    "UHostId": "uhost-1",
+                    "Metrics": [
+                        {
+                            "MetricKey": key,
+                            "Results": [
+                                {
+                                    "TagMap": {"gpu_bus_id": "01:00.0"},
+                                    "Values": [{"Timestamp": 1791444759, "Value": 0}],
+                                }
+                            ],
+                        }
+                        for key in instance.MONITOR_METRIC_LABELS
+                    ],
+                }
+            ]
+        }
+    }
+    monkeypatch.setattr(instance, "call", lambda *args: data)
+    result = runner.invoke(cli.app, ["instance", "monitor", "uhost-1"])
+
+    assert result.exit_code == 0, result.output
+    for label in ("CPU", "内存", "系统盘", "数据盘", "显存", "GPU", "01:00.0"):
+        assert label in result.stdout
+    assert "cloudwatch_" not in result.stdout
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_monitor_handles_empty_data(monkeypatch, json_output) -> None:
+    monkeypatch.setattr(
+        instance,
+        "_locate_instances",
+        lambda *args: ({"uhost-1": ("cn-wlcb", "cn-wlcb-01", {})}, []),
+    )
+    monkeypatch.setattr(instance, "call", lambda *args: {"Data": None})
+    result = runner.invoke(
+        cli.app, [*(["--json"] if json_output else []), "instance", "monitor", "uhost-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    if json_output:
+        assert _json_data(result.stdout) == {"Data": {"List": [], "PodList": []}}
+    else:
+        assert "暂无监控数据" in result.stdout
+
+
+def test_monitor_rejects_missing_instances_before_querying(monkeypatch) -> None:
+    monkeypatch.setattr(instance, "_locate_instances", lambda *args: ({}, ["uhost-missing"]))
+    result = runner.invoke(cli.app, ["instance", "monitor", "uhost-missing"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, UsageError)
+    assert "uhost-missing" in str(result.exception)
 
 
 def test_instance_show_json_redacts_private_fields_unless_enabled(monkeypatch) -> None:

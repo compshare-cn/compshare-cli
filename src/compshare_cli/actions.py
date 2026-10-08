@@ -113,7 +113,6 @@ UNAVAILABLE_ACTIONS = frozenset(
     {
         "AddFavoriteImage",
         "DescribeFavoriteImages",
-        "GetCompShareInstanceMonitor",
         "GetSoftwareURL",
         "RemoveFavoriteImage",
     }

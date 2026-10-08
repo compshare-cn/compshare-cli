@@ -359,8 +359,10 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Query current instance pricing.": "查询实例当前计费价格。",
     "Query instance refund amounts.": "查询实例退款金额。",
     "Get instance monitoring data.": "获取实例监控数据。",
-    "Get instance monitoring data (coming soon).": "获取实例监控数据（待上线）。",
-    "Instance monitoring is coming soon.": "实例监控功能待上线。",
+    "Monitoring requires UHostIds to be an array of strings.": (
+        "监控请求的 UHostIds 必须为字符串数组。"
+    ),
+    "No monitoring data returned for the selected instances.": "所选实例暂无监控数据。",
     "Change an instance billing type.": "变更实例计费方式。",
     "Check network accelerator status.": "检查网络加速状态。",
     "List models in the model repository.": "列出模型仓库中的模型。",
@@ -681,6 +683,9 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "SOURCE": "来源",
     "VERSION": "版本",
     "TAGS": "标签",
+    "METRIC": "指标",
+    "VALUE (%)": "使用率（%）",
+    "TIME": "采样时间",
     "ACCOUNT ID": "账户 ID",
     "ACCOUNT": "账户",
     "DISK ID": "云盘 ID",
@@ -891,12 +896,6 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "The disk is still detaching. Wait a moment and retry.": "云盘仍在卸载，请稍后重试。",
     "Confirm that US3 is enabled for the selected region and account.": (
         "请确认所选地域和账户已开通 US3。"
-    ),
-    "This production endpoint currently rejects instance IDs; use the console for monitoring.": (
-        "生产环境的该接口当前会拒绝实例 ID，请暂时在控制台查看监控。"
-    ),
-    "This production endpoint is currently incompatible; use the console for monitoring.": (
-        "生产环境的该接口当前不兼容，请暂时在控制台查看监控。"
     ),
     "This production endpoint currently rejects its action; use instance show or the console.": (
         "生产环境的该接口当前拒绝请求，请使用 instance show 或控制台。"

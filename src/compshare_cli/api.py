@@ -236,13 +236,6 @@ def error_hint(action: str, code: int) -> Optional[str]:
     hints = {
         ("DeleteCompshareDisk", 8434): "The disk is still detaching. Wait a moment and retry.",
         ("AttachUS3", 8433): "Confirm that US3 is enabled for the selected region and account.",
-        ("GetCompShareInstanceMonitor", 210): (
-            "This production endpoint currently rejects instance IDs; "
-            "use the console for monitoring."
-        ),
-        ("GetCompShareInstanceMonitor", 230): (
-            "This production endpoint is currently incompatible; use the console for monitoring."
-        ),
     }
     return tr(hints[(action, code)]) if (action, code) in hints else None
 

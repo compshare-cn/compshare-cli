@@ -55,6 +55,13 @@ compshare instance list --all
 
 # 连接实例
 compshare instance ssh INSTANCE_ID
+compshare --json instance ssh INSTANCE_ID -- nvidia-smi
+compshare --json instance ssh INSTANCE_ID -- sh -lc 'cd /workspace && pwd'
+
+# 上传、下载文件或目录
+compshare --json instance cp INSTANCE_ID ./model.bin :/workspace/model.bin
+compshare --json instance cp INSTANCE_ID ./dataset :/workspace/dataset
+compshare --json instance cp INSTANCE_ID :/workspace/results ./results
 
 # MiniMax H3：先预演，再创建
 compshare --json minimax create '一只猫在海边奔跑' --dry-run
@@ -77,6 +84,12 @@ compshare --json minimax audio create '你好，欢迎使用优云智算。' --v
 compshare -h
 compshare instance -h
 ```
+
+SSH 远程命令放在 `--` 后面，参数中的空格、引号和 `$` 会按原样传递；需要管道、重定向
+或 `&&` 时使用 `sh -lc '脚本'`。SSH 和文件传输共用一小时有效的连接缓存，重置密码或
+重装后可用 `--refresh` 强制刷新，`--no-cache` 禁用缓存。`--connect-timeout` 设置连接
+建立的最长时间（默认 30 秒），`ssh --timeout` 设置等待实例运行的时间；长任务使用
+`instance job`。
 
 ## 命令概览
 

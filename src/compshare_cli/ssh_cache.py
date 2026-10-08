@@ -126,14 +126,19 @@ class SSHCredentialCache:
         cached_at = raw.get("cached_at")
         host = raw.get("host")
         current = time.time() if now is None else now
-        if not isinstance(cached_at, (int, float)) or current - cached_at > ttl:
+        if not isinstance(cached_at, (int, float)) or not 0 <= current - cached_at <= ttl:
             return None
         if not isinstance(host, dict):
             return None
-        if not host.get("SshLoginCommand"):
+        if any(
+            not isinstance(host.get(field), str) or not host[field].strip()
+            for field in ("Region", "Zone", "SshLoginCommand")
+        ):
             return None
         result = dict(host)
         password = result.get("Password")
+        if password is not None and not isinstance(password, str):
+            return None
         if isinstance(password, str):
             clear = _unprotect_password(password)
             if clear is None:
@@ -178,7 +183,7 @@ class SSHCredentialCache:
             return {"version": CACHE_VERSION, "entries": {}}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return {"version": CACHE_VERSION, "entries": {}}
         if (
             not isinstance(data, dict)
@@ -191,8 +196,7 @@ class SSHCredentialCache:
     def _write(self, data: Dict[str, Any]) -> None:
         temporary: Optional[Path] = None
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            os.chmod(self.path.parent, stat.S_IRWXU)
+            self.path.parent.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",

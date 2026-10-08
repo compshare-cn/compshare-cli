@@ -1,4 +1,5 @@
 import json
+import shlex
 
 import pytest
 from typer.main import get_command
@@ -12,7 +13,7 @@ from compshare_cli.config import ConfigStore, Profile
 from compshare_cli.errors import UsageError
 from compshare_cli.i18n import localize_command
 from compshare_cli.runtime import Runtime
-from compshare_cli.ssh import RemoteExecutionResult
+from compshare_cli.ssh import PasswordAutomationUnavailable, RemoteExecutionResult
 
 runner = CliRunner()
 
@@ -1770,6 +1771,28 @@ def test_remote_job_execution_reports_remote_failure(monkeypatch) -> None:
         )
 
 
+def test_remote_job_stream_invalidates_credentials_even_when_just_fetched(monkeypatch) -> None:
+    deleted = []
+    monkeypatch.setattr(
+        instance,
+        "_remote_job_connection",
+        lambda *_: (["ssh", "example.invalid"], "secret", "api"),
+    )
+    monkeypatch.setattr(instance, "execute_with_password", lambda *_: 255)
+    monkeypatch.setattr(
+        instance.SSHCredentialCache,
+        "delete",
+        lambda _, profile, identifier: deleted.append(identifier),
+    )
+    assert (
+        instance._remote_job_stream(
+            Runtime(_profile=Profile("public", "private")), "uhost-1", "true"
+        )
+        == 255
+    )
+    assert deleted == ["uhost-1"]
+
+
 def test_remote_job_list_filters_state(monkeypatch) -> None:
     monkeypatch.setattr(
         instance,
@@ -1983,7 +2006,7 @@ def test_ssh_print_includes_sensitive_values_only_with_global_flag(monkeypatch) 
     assert result.exit_code == 0, result.output
     assert _json_data(result.stdout) == {
         "instance": "uhost-1",
-        "command": "ssh root@example.invalid",
+        "command": "ssh -o ConnectTimeout=30 root@example.invalid",
         "password": "instance-secret",
         "credential_source": "api",
     }
@@ -2020,6 +2043,135 @@ def test_ssh_reuses_cached_connection_data_without_describing_again(monkeypatch)
     assert descriptions == ["uhost-1"]
 
 
+@pytest.mark.parametrize("options", [[], ["--refresh"], ["--no-cache"]])
+def test_cp_reuses_ssh_cache_and_can_bypass_it(monkeypatch, tmp_path, options) -> None:
+    descriptions = []
+    host = {
+        "UHostId": "uhost-1",
+        "Region": "cn-wlcb",
+        "Zone": "cn-wlcb-01",
+        "State": "Running",
+        "SshLoginCommand": "ssh root@example.invalid",
+    }
+
+    def locate(*_):
+        descriptions.append(True)
+        return host["Region"], host["Zone"], host
+
+    monkeypatch.setattr(instance, "locate_instance", locate)
+    source = tmp_path / "source"
+    source.write_text("test")
+    first = runner.invoke(cli.app, ["--json", "instance", "ssh", "uhost-1", "--print"])
+    assert first.exit_code == 0, first.exception
+    copied = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "--show-sensitive",
+            "instance",
+            "cp",
+            "uhost-1",
+            str(source),
+            ":/remote",
+            "--print",
+            "--connect-timeout",
+            "4",
+            *options,
+        ],
+    )
+    assert copied.exit_code == 0, copied.exception
+    assert "ConnectTimeout=4" in _json_data(copied.stdout)["command"]
+    assert len(descriptions) == (2 if options else 1)
+
+
+@pytest.mark.parametrize("command", ["ssh", "cp"])
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize("transport_failure", [False, True])
+def test_ssh_and_cp_invalidate_only_failed_connections(
+    monkeypatch, tmp_path, command, cached, transport_failure
+) -> None:
+    descriptions = []
+    host = {
+        "UHostId": "uhost-1",
+        "Region": "cn-wlcb",
+        "Zone": "cn-wlcb-01",
+        "State": "Running",
+        "SshLoginCommand": "ssh root@example.invalid",
+        "Password": "secret",
+    }
+
+    def locate(*_):
+        descriptions.append(True)
+        return host["Region"], host["Zone"], host
+
+    monkeypatch.setattr(instance, "locate_instance", locate)
+    print_args = ["--json", "instance", "ssh", "uhost-1", "--print"]
+    if cached:
+        assert runner.invoke(cli.app, print_args).exit_code == 0
+    execution = RemoteExecutionResult(
+        255 if transport_failure else 1,
+        "",
+        "failed",
+        "authentication" if transport_failure else "remote_command",
+        "authentication_failed" if transport_failure else "remote_exit_nonzero",
+    )
+    monkeypatch.setattr(instance, "execute_captured_with_password", lambda *_: execution)
+    monkeypatch.setattr(instance, "copy_captured_with_password", lambda *_: execution)
+    if command == "ssh":
+        arguments = ["--", "false"]
+    else:
+        source = tmp_path / "source"
+        source.write_text("test")
+        arguments = [str(source), ":/remote"]
+    failed = runner.invoke(cli.app, ["--json", "instance", command, "uhost-1", *arguments])
+    assert failed.exit_code == execution.exit_code, failed.exception
+    next_connection = runner.invoke(cli.app, print_args)
+    assert next_connection.exit_code == 0, next_connection.exception
+    assert _json_data(next_connection.stdout)["credential_source"] == (
+        "api" if transport_failure else "cache"
+    )
+    assert len(descriptions) == (2 if transport_failure else 1)
+
+
+@pytest.mark.parametrize("command", ["ssh", "cp"])
+def test_missing_askpass_is_a_json_error(monkeypatch, capsys, tmp_path, command) -> None:
+    host = {"SshLoginCommand": "ssh root@example.invalid", "Password": "secret"}
+    monkeypatch.setattr(instance, "locate_instance", lambda *_: ("cn-wlcb", "cn-wlcb-01", host))
+    monkeypatch.setattr(cli, "record_command", lambda *_: None)
+
+    def unavailable(*_):
+        raise PasswordAutomationUnavailable("compshare-ssh-askpass is missing")
+
+    monkeypatch.setattr(instance, "execute_captured_with_password", unavailable)
+    monkeypatch.setattr(instance, "copy_captured_with_password", unavailable)
+    if command == "ssh":
+        arguments = ["--", "true"]
+    else:
+        source = tmp_path / "source"
+        source.write_text("test")
+        arguments = [str(source), ":/remote"]
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", "instance", command, "uhost-1", *arguments])
+    assert exc.value.code == 2
+    error = _json_error(capsys.readouterr().out)
+    assert error["code"] == "cli_error"
+    assert "compshare-ssh-askpass" in error["message"]
+
+
+@pytest.mark.parametrize("login", ["ssh 'unterminated", "python -c malicious", "ssh host echo"])
+def test_malformed_ssh_login_is_a_json_usage_error(monkeypatch, capsys, login) -> None:
+    monkeypatch.setattr(
+        instance,
+        "locate_instance",
+        lambda *_: ("cn-wlcb", "cn-wlcb-01", {"SshLoginCommand": login}),
+    )
+    monkeypatch.setattr(cli, "record_command", lambda *_: None)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", "instance", "ssh", "uhost-1", "--", "true"])
+    assert exc.value.code == 2
+    assert _json_error(capsys.readouterr().out)["code"] == "invalid_usage"
+
+
 def test_ssh_automatically_enters_hidden_password_by_default(monkeypatch) -> None:
     monkeypatch.setattr(
         instance,
@@ -2046,7 +2198,9 @@ def test_ssh_automatically_enters_hidden_password_by_default(monkeypatch) -> Non
 
     assert result.exit_code == 0, result.output
     assert "instance-secret" not in result.stdout
-    assert connections == [(["ssh", "root@example.invalid"], "instance-secret")]
+    assert connections == [
+        (["ssh", "-o", "ConnectTimeout=30", "root@example.invalid"], "instance-secret")
+    ]
 
 
 def test_ssh_decodes_api_password_before_connecting(monkeypatch) -> None:
@@ -2076,7 +2230,9 @@ def test_ssh_decodes_api_password_before_connecting(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "instance-secret" not in result.stdout
     assert "aW5zdGFuY2Utc2VjcmV0" not in result.stdout
-    assert connections == [(["ssh", "root@example.invalid"], "instance-secret")]
+    assert connections == [
+        (["ssh", "-o", "ConnectTimeout=30", "root@example.invalid"], "instance-secret")
+    ]
 
 
 def test_ssh_shows_password_before_connecting_with_global_flag(monkeypatch) -> None:
@@ -2121,7 +2277,7 @@ def test_ssh_can_disable_automatic_password_entry(monkeypatch) -> None:
         ),
     )
     commands = []
-    monkeypatch.setattr(instance.subprocess, "call", lambda argv: commands.append(argv) or 0)
+    monkeypatch.setattr(instance, "run_command", lambda argv: commands.append(argv) or 0)
 
     result = runner.invoke(
         cli.app,
@@ -2131,7 +2287,7 @@ def test_ssh_can_disable_automatic_password_entry(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "instance-secret" not in result.stdout
     assert "--show-sensitive" in result.stdout
-    assert commands == [["ssh", "root@example.invalid"]]
+    assert commands == [["ssh", "-o", "ConnectTimeout=30", "root@example.invalid"]]
 
 
 def test_ssh_falls_back_when_password_automation_is_unavailable(monkeypatch) -> None:
@@ -2155,14 +2311,14 @@ def test_ssh_falls_back_when_password_automation_is_unavailable(monkeypatch) -> 
 
     commands = []
     monkeypatch.setattr(instance, "connect_with_password", unavailable)
-    monkeypatch.setattr(instance.subprocess, "call", lambda argv: commands.append(argv) or 0)
+    monkeypatch.setattr(instance, "run_command", lambda argv: commands.append(argv) or 0)
 
     result = runner.invoke(cli.app, ["instance", "ssh", "uhost-1"])
 
     assert result.exit_code == 0, result.output
     assert "instance-secret" not in result.stdout
-    assert "无法自动填写密码" in result.stdout + result.stderr
-    assert commands == [["ssh", "root@example.invalid"]]
+    assert "无法自动填写密码" in result.output
+    assert commands == [["ssh", "-o", "ConnectTimeout=30", "root@example.invalid"]]
 
 
 def test_ssh_executes_remote_command_with_password_and_returns_its_status(monkeypatch) -> None:
@@ -2210,8 +2366,7 @@ def test_ssh_executes_remote_command_with_password_and_returns_its_status(monkey
                 "-p",
                 "2222",
                 "root@example.invalid",
-                "nvidia-smi",
-                "--query-gpu=name",
+                "nvidia-smi --query-gpu=name",
             ],
             "instance-secret",
         )
@@ -2308,14 +2463,23 @@ def test_ssh_print_includes_quoted_remote_command_when_sensitive(monkeypatch) ->
             "uhost-1",
             "--print",
             "--",
+            "sh",
+            "-lc",
             "cd /workspace && python train.py",
         ],
     )
 
     assert result.exit_code == 0, result.output
-    assert _json_data(result.stdout) == {
+    data = _json_data(result.stdout)
+    assert shlex.split(data.pop("command")) == [
+        "ssh",
+        "-o",
+        "ConnectTimeout=30",
+        "root@example.invalid",
+        "sh -lc 'cd /workspace && python train.py'",
+    ]
+    assert data == {
         "instance": "uhost-1",
-        "command": "ssh root@example.invalid 'cd /workspace && python train.py'",
         "password": "instance-secret",
         "credential_source": "api",
     }
@@ -2356,6 +2520,8 @@ def test_scp_uploads_local_file_with_instance_password(monkeypatch, tmp_path) ->
         (
             [
                 "scp",
+                "-o",
+                "ConnectTimeout=30",
                 "-P",
                 "2222",
                 str(source.resolve()),
@@ -2399,6 +2565,8 @@ def test_scp_uploads_directory_recursively(monkeypatch, tmp_path) -> None:
     assert copies == [
         [
             "scp",
+            "-o",
+            "ConnectTimeout=30",
             "-r",
             str(source.resolve()),
             "root@example.invalid:/workspace/dataset",
@@ -2435,7 +2603,15 @@ def test_cp_upload_accepts_explicit_remote_path_marker(monkeypatch, tmp_path) ->
     )
 
     assert result.exit_code == 0, result.output
-    assert copies == [["scp", str(source.resolve()), "root@example.invalid:/workspace/model.bin"]]
+    assert copies == [
+        [
+            "scp",
+            "-o",
+            "ConnectTimeout=30",
+            str(source.resolve()),
+            "root@example.invalid:/workspace/model.bin",
+        ]
+    ]
 
 
 def test_cp_downloads_remote_file_or_directory_recursively(monkeypatch, tmp_path) -> None:
@@ -2470,6 +2646,8 @@ def test_cp_downloads_remote_file_or_directory_recursively(monkeypatch, tmp_path
         (
             [
                 "scp",
+                "-o",
+                "ConnectTimeout=30",
                 "-P",
                 "2222",
                 "-r",
@@ -2581,6 +2759,8 @@ def test_json_scp_executes_and_returns_structured_result(monkeypatch, tmp_path) 
         (
             [
                 "scp",
+                "-o",
+                "ConnectTimeout=30",
                 str(source.resolve()),
                 "root@example.invalid:/workspace/model.bin",
             ],

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from compshare_cli import ssh
+from compshare_cli.errors import CLIError, UsageError
 
 
 def test_connect_with_password_answers_split_prompt_once(monkeypatch) -> None:
@@ -56,6 +57,8 @@ def test_connect_with_password_answers_split_prompt_once(monkeypatch) -> None:
             "NumberOfPasswordPrompts=1",
             "-o",
             "StrictHostKeyChecking=accept-new",
+            "-o",
+            "BatchMode=no",
             "-p",
             "22",
             "root@example.invalid",
@@ -101,6 +104,8 @@ def test_connect_with_password_uses_askpass_on_windows(monkeypatch) -> None:
         "NumberOfPasswordPrompts=1",
         "-o",
         "StrictHostKeyChecking=accept-new",
+        "-o",
+        "BatchMode=no",
         "-p",
         "2222",
         "root@example.invalid",
@@ -137,6 +142,8 @@ def test_execute_with_password_uses_askpass_without_password_in_argv(monkeypatch
         "NumberOfPasswordPrompts=1",
         "-o",
         "StrictHostKeyChecking=accept-new",
+        "-o",
+        "BatchMode=no",
         "-n",
         "-T",
         "root@example.invalid",
@@ -264,7 +271,7 @@ def test_copy_with_password_adds_scp_authentication_options(monkeypatch) -> None
 
     assert exit_code == 11
     argv, password = calls[0]
-    assert argv[:9] == [
+    assert argv[:11] == [
         "scp",
         "-o",
         "PreferredAuthentications=password,keyboard-interactive",
@@ -274,11 +281,164 @@ def test_copy_with_password_adds_scp_authentication_options(monkeypatch) -> None
         "NumberOfPasswordPrompts=1",
         "-o",
         "StrictHostKeyChecking=accept-new",
+        "-o",
+        "BatchMode=no",
     ]
-    assert argv[9:] == [
+    assert argv[11:] == [
         "-P",
         "2222",
         "/local/model.bin",
         "root@example.invalid:/workspace",
     ]
     assert password == "instance-secret"
+
+
+@pytest.mark.parametrize(
+    "diagnostic", ["Permission denied", "Connection refused", "No route to host"]
+)
+def test_remote_program_diagnostics_are_not_ssh_failures(diagnostic) -> None:
+    result = ssh.remote_execution_result(7, "output", diagnostic)
+    assert result.phase == "remote_command"
+    assert result.error_code == "remote_exit_nonzero"
+    assert result.stdout == "output"
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "phase", "error_code"),
+    [
+        ("Could not resolve hostname x", "connection", "dns_resolution_failed"),
+        ("Name or service not known", "connection", "dns_resolution_failed"),
+        ("Operation timed out", "connection", "connection_timeout"),
+        ("No route to host", "connection", "network_unreachable"),
+        ("Network is unreachable", "connection", "network_unreachable"),
+        ("Connection refused", "connection", "connection_refused"),
+        ("Host key verification failed", "connection", "host_key_verification_failed"),
+        ("Authentication failed", "authentication", "authentication_failed"),
+        ("Too many authentication failures", "authentication", "authentication_failed"),
+    ],
+)
+def test_other_ssh_failure_diagnostics(diagnostic, phase, error_code) -> None:
+    result = ssh.remote_execution_result(255, "", diagnostic)
+    assert (result.phase, result.error_code) == (phase, error_code)
+
+
+@pytest.mark.parametrize(
+    ("login", "destination", "options"),
+    [
+        (["ssh", "root@2001:db8::1"], "root@[2001:db8::1]", []),
+        (["ssh", "root@[2001:db8::1]"], "root@[2001:db8::1]", []),
+        (["ssh", "-l", "alice", "root@example.invalid"], "alice@example.invalid", []),
+        (["ssh", "ssh://root@example.invalid:2222"], "root@example.invalid", ["-P", "2222"]),
+    ],
+)
+def test_scp_connection_preserves_native_ssh_destinations(login, destination, options) -> None:
+    assert ssh.scp_upload_command(login, "/local/file", "/remote/file") == [
+        "scp",
+        *options,
+        "/local/file",
+        f"{destination}:/remote/file",
+    ]
+
+
+@pytest.mark.parametrize(
+    "login",
+    [
+        [],
+        ["sh", "example.invalid"],
+        ["ssh"],
+        ["ssh", ""],
+        ["ssh", "-p"],
+        ["ssh", "example.invalid", "echo"],
+        ["ssh", "ssh://example.invalid:invalid"],
+    ],
+)
+def test_scp_rejects_invalid_login_commands(login) -> None:
+    with pytest.raises(ValueError):
+        ssh.scp_upload_command(login, "/local/file", "/remote/file")
+
+
+def test_key_authentication_capture_never_prompts(monkeypatch) -> None:
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return ssh.subprocess.CompletedProcess(argv, 0, "中文\n", "")
+
+    monkeypatch.setattr(ssh.subprocess, "run", run)
+    result = ssh.execute_captured(["ssh", "example.invalid", "true"])
+    assert result.ok
+    assert "BatchMode=yes" in calls[0][0]
+    assert calls[0][1]["errors"] == "replace"
+
+
+@pytest.mark.parametrize(
+    "runner", [ssh.execute_captured_with_password, ssh.copy_captured_with_password]
+)
+def test_captured_password_authentication_cleans_up_on_failure(monkeypatch, runner) -> None:
+    password_files = []
+    monkeypatch.setattr(ssh, "_askpass_executable", lambda: "/unused/askpass")
+
+    def run(argv, **kwargs):
+        password_file = Path(kwargs["env"][ssh._ASKPASS_PASSWORD_FILE_ENV])
+        password_files.append(password_file)
+        assert password_file.read_text() == "temporary-secret"
+        assert password_file.stat().st_mode & 0o777 == 0o600
+        raise OSError("test process failure")
+
+    monkeypatch.setattr(ssh.subprocess, "run", run)
+    executable = "scp" if runner == ssh.copy_captured_with_password else "ssh"
+    with pytest.raises(CLIError, match="test process failure"):
+        runner([executable, "example.invalid"], "temporary-secret")
+    assert password_files and all(not path.exists() for path in password_files)
+
+
+@pytest.mark.parametrize("missing", [True, False])
+def test_askpass_missing_environment_or_file_exits_cleanly(monkeypatch, tmp_path, missing) -> None:
+    monkeypatch.delenv(ssh._ASKPASS_PASSWORD_FILE_ENV, raising=False)
+    if not missing:
+        monkeypatch.setenv(ssh._ASKPASS_PASSWORD_FILE_ENV, str(tmp_path / "absent"))
+    with pytest.raises(SystemExit) as exc:
+        ssh.askpass()
+    assert exc.value.code == 1
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "phase", "error_code"),
+    [
+        ("root@x: Permission denied (password).", "authentication", "authentication_failed"),
+        ("scp: /restricted: Permission denied", "file_transfer", "transfer_failed"),
+        ("scp: /missing: No such file or directory", "file_transfer", "transfer_failed"),
+        ("ssh: Connection refused", "connection", "connection_refused"),
+    ],
+)
+def test_scp_distinguishes_file_errors_from_authentication(diagnostic, phase, error_code) -> None:
+    result = ssh.remote_execution_result(1, "", diagnostic, transfer=True)
+    assert (result.phase, result.error_code) == (phase, error_code)
+
+
+@pytest.mark.parametrize("login", [None, {}, "", "ssh", "ssh 'unterminated", "sh x", "ssh x echo"])
+def test_login_command_validation_is_user_facing(login) -> None:
+    with pytest.raises(UsageError, match="SSH"):
+        ssh.ssh_login_command(login)
+
+
+def test_capture_replaces_invalid_utf8_output() -> None:
+    result = ssh.run_command(
+        [ssh.sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'\\xff')"],
+        capture=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "\ufffd"
+
+
+def test_missing_askpass_helper_has_a_useful_error(monkeypatch) -> None:
+    monkeypatch.setattr(ssh.os.path, "isfile", lambda *_: False)
+    monkeypatch.setattr(ssh.shutil, "which", lambda *_: None)
+    with pytest.raises(ssh.PasswordAutomationUnavailable, match="compshare-ssh-askpass"):
+        ssh._askpass_executable()
+
+
+@pytest.mark.parametrize("capture", [False, True])
+def test_missing_process_is_a_user_facing_error(capture) -> None:
+    with pytest.raises(CLIError, match="compshare-no-such-executable"):
+        ssh.run_command(["compshare-no-such-executable"], capture=capture)

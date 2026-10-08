@@ -831,9 +831,11 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Incomplete credentials": "凭证不完整",
     "Not configured": "未配置",
     "Instance {instance} has no SSH login command.": "实例 {instance} 没有可用的 SSH 登录命令。",
-    "The API did not return a password. Run `compshare instance password {instance}` to set one.": (
-        "API 未返回密码。请运行 `compshare instance password {instance}` 设置密码。"
+    "The instance SSH login command is invalid.": "实例的 SSH 登录命令无效。",
+    "SSH password automation requires compshare-ssh-askpass; reinstall compshare-cli.": (
+        "自动填写 SSH 密码需要 compshare-ssh-askpass；请重新安装 compshare-cli。"
     ),
+    "Unable to run {executable}: {detail}": "无法运行 {executable}：{detail}",
     "Password hidden; rerun with --show-sensitive to display it.": (
         "密码已隐藏；如需显示，请使用 --show-sensitive 重新运行。"
     ),

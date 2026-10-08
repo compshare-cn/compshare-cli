@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -9,6 +10,10 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from typing import Any, List, Optional
+from urllib.parse import urlsplit
+
+from compshare_cli.errors import CLIError, UsageError
+from compshare_cli.i18n import tr
 
 _ASKPASS_PASSWORD_FILE_ENV = "COMPSHARE_INTERNAL_SSH_PASSWORD_FILE"
 _SSH_OPTIONS_WITH_VALUE = {
@@ -37,7 +42,7 @@ _SSH_OPTIONS_WITH_VALUE = {
 _SCP_SHARED_OPTIONS = {"-c", "-F", "-i", "-J", "-o"}
 
 
-class PasswordAutomationUnavailable(RuntimeError):
+class PasswordAutomationUnavailable(CLIError):
     """Raised when the current terminal cannot safely automate an SSH password."""
 
 
@@ -61,7 +66,7 @@ def _is_windows() -> bool:
 
 
 def _password_authentication(argv: List[str], *, command_mode: bool = False) -> List[str]:
-    executable = os.path.basename(argv[0]).casefold()
+    executable = os.path.basename(argv[0]).casefold() if argv else ""
     if executable not in {"ssh", "ssh.exe"}:
         raise PasswordAutomationUnavailable
     options = [
@@ -74,6 +79,8 @@ def _password_authentication(argv: List[str], *, command_mode: bool = False) -> 
         "NumberOfPasswordPrompts=1",
         "-o",
         "StrictHostKeyChecking=accept-new",
+        "-o",
+        "BatchMode=no",
     ]
     if command_mode:
         options.extend(["-n", "-T"])
@@ -81,7 +88,7 @@ def _password_authentication(argv: List[str], *, command_mode: bool = False) -> 
 
 
 def _scp_password_authentication(argv: List[str]) -> List[str]:
-    executable = os.path.basename(argv[0]).casefold()
+    executable = os.path.basename(argv[0]).casefold() if argv else ""
     if executable not in {"scp", "scp.exe"}:
         raise PasswordAutomationUnavailable
     return [
@@ -94,6 +101,8 @@ def _scp_password_authentication(argv: List[str]) -> List[str]:
         "NumberOfPasswordPrompts=1",
         "-o",
         "StrictHostKeyChecking=accept-new",
+        "-o",
+        "BatchMode=no",
         *argv[1:],
     ]
 
@@ -137,11 +146,37 @@ def _scp_connection(ssh_argv: List[str]) -> tuple[List[str], str]:
             raise ValueError("SSH login command contains a remote command")
         index += 1
 
-    if destination is None:
+    if not destination:
         raise ValueError("SSH login command has no destination")
-    if login and "@" not in destination:
-        destination = f"{login}@{destination}"
+    if destination.startswith("ssh://"):
+        parsed = urlsplit(destination)
+        if not parsed.hostname or parsed.path or parsed.query or parsed.fragment:
+            raise ValueError("invalid SSH destination URI")
+        destination = parsed.hostname
+        login = login or parsed.username
+        if parsed.port is not None and "-P" not in scp_options:
+            scp_options.extend(("-P", str(parsed.port)))
+    username, separator, hostname = destination.rpartition("@")
+    if not separator:
+        hostname = destination
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    username = login or username
+    destination = f"{username}@{hostname}" if username else hostname
     return scp_options, destination
+
+
+def ssh_login_command(command: str, *, connect_timeout: int = 30) -> List[str]:
+    """Validate an API login command and bound connection setup for every caller."""
+    try:
+        if not isinstance(command, str):
+            raise ValueError("SSH login command must be a string")
+        argv = shlex.split(command)
+        _scp_connection(argv)
+    except (TypeError, ValueError) as exc:
+        raise UsageError(tr("The instance SSH login command is invalid.")) from exc
+    argv[1:1] = ["-o", f"ConnectTimeout={connect_timeout}"]
+    return argv
 
 
 def scp_upload_command(
@@ -180,7 +215,9 @@ def _askpass_executable() -> str:
     located = shutil.which(name)
     if located:
         return located
-    raise PasswordAutomationUnavailable
+    raise PasswordAutomationUnavailable(
+        tr("SSH password automation requires compshare-ssh-askpass; reinstall compshare-cli.")
+    )
 
 
 def askpass() -> None:
@@ -217,25 +254,33 @@ def execute_captured_with_password(argv: List[str], password: str) -> RemoteExec
 
 def execute_captured(argv: List[str]) -> RemoteExecutionResult:
     """Run and capture a non-interactive SSH command using normal OpenSSH auth."""
-    executable = os.path.basename(argv[0]).casefold()
+    executable = os.path.basename(argv[0]).casefold() if argv else ""
     if executable not in {"ssh", "ssh.exe"}:
         raise PasswordAutomationUnavailable
     command = [
         argv[0],
+        "-o",
+        "BatchMode=yes",
         "-o",
         "StrictHostKeyChecking=accept-new",
         "-n",
         "-T",
         *argv[1:],
     ]
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    completed = run_command(command, capture=True)
     return remote_execution_result(completed.returncode, completed.stdout, completed.stderr)
 
 
-def remote_execution_result(exit_code: int, stdout: str, stderr: str) -> RemoteExecutionResult:
+def remote_execution_result(
+    exit_code: int, stdout: str, stderr: str, *, transfer: bool = False
+) -> RemoteExecutionResult:
     """Classify common OpenSSH failures while preserving the original diagnostics."""
     if exit_code == 0:
         return RemoteExecutionResult(exit_code, stdout, stderr, "completed")
+    if exit_code != 255 and not transfer:
+        return RemoteExecutionResult(
+            exit_code, stdout, stderr, "remote_command", "remote_exit_nonzero"
+        )
 
     diagnostic = stderr.casefold()
     patterns = (
@@ -247,7 +292,7 @@ def remote_execution_result(exit_code: int, stdout: str, stderr: str) -> RemoteE
         ("network is unreachable", "connection", "network_unreachable"),
         ("connection refused", "connection", "connection_refused"),
         ("host key verification failed", "connection", "host_key_verification_failed"),
-        ("permission denied", "authentication", "authentication_failed"),
+        ("permission denied (", "authentication", "authentication_failed"),
         ("authentication failed", "authentication", "authentication_failed"),
         ("too many authentication failures", "authentication", "authentication_failed"),
     )
@@ -256,7 +301,7 @@ def remote_execution_result(exit_code: int, stdout: str, stderr: str) -> RemoteE
             return RemoteExecutionResult(exit_code, stdout, stderr, phase, error_code)
     if exit_code == 255:
         return RemoteExecutionResult(exit_code, stdout, stderr, "ssh", "ssh_failed")
-    return RemoteExecutionResult(exit_code, stdout, stderr, "remote_command", "remote_exit_nonzero")
+    return RemoteExecutionResult(exit_code, stdout, stderr, "file_transfer", "transfer_failed")
 
 
 def copy_with_password(argv: List[str], password: str) -> int:
@@ -270,12 +315,14 @@ def copy_captured_with_password(argv: List[str], password: str) -> RemoteExecuti
     command = _scp_password_authentication(argv)
     completed = _run_with_askpass(command, password, capture=True)
     assert isinstance(completed, subprocess.CompletedProcess)
-    return remote_execution_result(completed.returncode, completed.stdout, completed.stderr)
+    return remote_execution_result(
+        completed.returncode, completed.stdout, completed.stderr, transfer=True
+    )
 
 
 def copy_captured(argv: List[str]) -> RemoteExecutionResult:
     """Run and capture an SCP transfer using non-interactive OpenSSH authentication."""
-    executable = os.path.basename(argv[0]).casefold()
+    executable = os.path.basename(argv[0]).casefold() if argv else ""
     if executable not in {"scp", "scp.exe"}:
         raise PasswordAutomationUnavailable
     command = [
@@ -286,8 +333,34 @@ def copy_captured(argv: List[str]) -> RemoteExecutionResult:
         "StrictHostKeyChecking=accept-new",
         *argv[1:],
     ]
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
-    return remote_execution_result(completed.returncode, completed.stdout, completed.stderr)
+    completed = run_command(command, capture=True)
+    return remote_execution_result(
+        completed.returncode, completed.stdout, completed.stderr, transfer=True
+    )
+
+
+def run_command(
+    command: List[str], *, capture: bool = False, environment: Optional[dict] = None
+) -> Any:
+    """Keep process failures user-facing and captured output safe for JSON."""
+    try:
+        if capture:
+            return subprocess.run(
+                command,
+                env=environment,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+        if environment is None:
+            return subprocess.call(command)
+        return subprocess.call(command, env=environment)
+    except OSError as exc:
+        raise CLIError(
+            tr("Unable to run {executable}: {detail}", executable=command[0], detail=exc)
+        ) from exc
 
 
 def _run_with_askpass(
@@ -310,15 +383,7 @@ def _run_with_askpass(
             }
         )
         environment.setdefault("DISPLAY", "compshare-ssh")
-        if capture:
-            return subprocess.run(
-                command,
-                env=environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        return subprocess.call(command, env=environment)
+        return run_command(command, capture=capture, environment=environment)
 
 
 def connect_with_password(argv: List[str], password: str) -> int:
@@ -335,12 +400,17 @@ def connect_with_password(argv: List[str], password: str) -> int:
 
     command = _password_authentication(argv)
     size = shutil.get_terminal_size(fallback=(80, 24))
-    child = pexpect.spawn(
-        command[0],
-        command[1:],
-        encoding=None,
-        dimensions=(size.lines, size.columns),
-    )
+    try:
+        child = pexpect.spawn(
+            command[0],
+            command[1:],
+            encoding=None,
+            dimensions=(size.lines, size.columns),
+        )
+    except (OSError, pexpect.ExceptionPexpect) as exc:
+        raise CLIError(
+            tr("Unable to run {executable}: {detail}", executable=command[0], detail=exc)
+        ) from exc
     prompt = re.compile(rb"password\s*:\s*$", re.IGNORECASE)
     password_bytes = password.encode("utf-8")
     tail = b""

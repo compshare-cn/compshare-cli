@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import shlex
-import subprocess
 import sys
 import time
 from datetime import datetime
@@ -64,8 +63,10 @@ from compshare_cli.ssh import (
     execute_captured,
     execute_captured_with_password,
     execute_with_password,
+    run_command,
     scp_download_command,
     scp_upload_command,
+    ssh_login_command,
 )
 from compshare_cli.ssh_cache import DEFAULT_TTL, SSHCredentialCache
 
@@ -495,8 +496,7 @@ def _remote_job_connection(
         raise UsageError(tr("Instance {instance} has no SSH login command.", instance=instance))
     raw_password = host.get("Password")
     password = decode_password(str(raw_password)) if raw_password is not None else None
-    argv = [*shlex.split(str(login_command))]
-    argv[1:1] = ["-o", f"ConnectTimeout={connect_timeout}"]
+    argv = ssh_login_command(login_command, connect_timeout=connect_timeout)
     argv.append(shell_command(script))
     return argv, password, credential_source
 
@@ -540,9 +540,9 @@ def _remote_job_records(
 
 
 def _remote_job_stream(state: Runtime, instance: str, script: str) -> int:
-    argv, password, credential_source = _remote_job_connection(state, instance, script)
-    exit_code = execute_with_password(argv, password) if password else subprocess.call(argv)
-    if exit_code == 255 and credential_source == "cache":
+    argv, password, _ = _remote_job_connection(state, instance, script)
+    exit_code = execute_with_password(argv, password) if password else run_command(argv)
+    if exit_code == 255:
         SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
     return exit_code
 
@@ -2891,16 +2891,14 @@ def ssh(
     password = decode_password(str(raw_password)) if raw_password is not None else None
     if not command:
         raise UsageError(tr("Instance {instance} has no SSH login command.", instance=instance))
-    argv = [*shlex.split(command), *(remote_command or [])]
+    argv = ssh_login_command(command, connect_timeout=connect_timeout)
     if remote_command:
-        argv[1:1] = ["-o", f"ConnectTimeout={connect_timeout}"]
+        argv.append(joined_command(remote_command))
     if print_only or (state.json_output and not remote_command):
         Renderer(state.json_output, state.show_sensitive).data(
             {
                 "instance": instance,
-                "command": command
-                if not remote_command
-                else f"{command} {shlex.join(remote_command)}",
+                "command": shlex.join(argv),
                 "password": password,
                 "credential_source": credential_source,
             }
@@ -2920,7 +2918,7 @@ def ssh(
                 "code": execution.error_code,
                 "message": message,
             }
-            if credential_source == "cache" and execution.phase in {
+            if use_cache and execution.phase in {
                 "authentication",
                 "connection",
                 "ssh",
@@ -2956,21 +2954,13 @@ def ssh(
                 err=True,
             )
         else:
-            if exit_code == 255 and credential_source == "cache":
+            if exit_code == 255 and use_cache:
                 SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
             raise typer.Exit(exit_code)
     if password and not state.show_sensitive:
         typer.echo(tr("Password hidden; rerun with --show-sensitive to display it."))
-    elif not password:
-        typer.echo(
-            tr(
-                "The API did not return a password. Run `compshare instance password {instance}` "
-                "to set one.",
-                instance=instance,
-            )
-        )
-    exit_code = subprocess.call(argv)
-    if exit_code == 255 and credential_source == "cache":
+    exit_code = run_command(argv)
+    if exit_code == 255 and use_cache:
         SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
     raise typer.Exit(exit_code)
 
@@ -2993,6 +2983,22 @@ def cp(
         True,
         "--auto-password/--no-auto-password",
         help="Automatically enter the password returned by the API.",
+    ),
+    connect_timeout: int = typer.Option(
+        30, "--connect-timeout", min=1, help="Maximum SSH connection time in seconds."
+    ),
+    use_cache: bool = typer.Option(
+        True,
+        "--cache/--no-cache",
+        help="Cache SSH connection data to avoid repeated instance queries.",
+    ),
+    cache_ttl: int = typer.Option(
+        DEFAULT_TTL, "--cache-ttl", min=1, help="SSH connection cache lifetime in seconds."
+    ),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help="Refresh SSH connection data from the API before connecting.",
     ),
 ) -> None:
     source_is_remote = source_path.startswith(":")
@@ -3019,14 +3025,16 @@ def cp(
         raise UsageError(tr("Remote path cannot be empty."))
 
     state = runtime(ctx)
-    _, _, host = locate_instance(state, instance)
+    _, _, host, _ = _locate_ssh_instance(
+        state, instance, use_cache=use_cache, refresh=refresh, cache_ttl=cache_ttl
+    )
     login_command = host.get("SshLoginCommand")
     raw_password = host.get("Password")
     password = decode_password(str(raw_password)) if raw_password is not None else None
     if not login_command:
         raise UsageError(tr("Instance {instance} has no SSH login command.", instance=instance))
     try:
-        ssh_argv = shlex.split(str(login_command))
+        ssh_argv = ssh_login_command(login_command, connect_timeout=connect_timeout)
         if direction == "download":
             argv = scp_download_command(ssh_argv, remote_path, str(local), recursive=True)
         else:
@@ -3061,6 +3069,8 @@ def cp(
                 "code": execution.error_code,
                 "message": message,
             }
+            if use_cache and execution.phase in {"authentication", "connection", "ssh"}:
+                SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
         Renderer(True, state.show_sensitive).data(
             {
                 "instance": instance,
@@ -3084,15 +3094,12 @@ def cp(
                 err=True,
             )
         else:
+            if exit_code == 255 and use_cache:
+                SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
             raise typer.Exit(exit_code)
     if password and not state.show_sensitive:
         typer.echo(tr("Password hidden; rerun with --show-sensitive to display it."))
-    elif not password:
-        typer.echo(
-            tr(
-                "The API did not return a password. Run `compshare instance password {instance}` "
-                "to set one.",
-                instance=instance,
-            )
-        )
-    raise typer.Exit(subprocess.call(argv))
+    exit_code = run_command(argv)
+    if exit_code == 255 and use_cache:
+        SSHCredentialCache().delete(_ssh_cache_profile(state), instance)
+    raise typer.Exit(exit_code)

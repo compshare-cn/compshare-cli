@@ -1,6 +1,9 @@
 import json
 import stat
 
+import pytest
+
+from compshare_cli import ssh_cache
 from compshare_cli.ssh_cache import SSHCredentialCache
 
 
@@ -45,3 +48,71 @@ def test_corrupt_ssh_cache_is_ignored(tmp_path) -> None:
     path.write_text("not json", encoding="utf-8")
 
     assert SSHCredentialCache(path).get("default", "uhost-1") is None
+
+
+@pytest.mark.parametrize("timestamp", [200, float("nan"), float("inf"), "invalid", None])
+def test_invalid_cache_timestamps_are_ignored(tmp_path, timestamp) -> None:
+    cache = SSHCredentialCache(tmp_path / "ssh-cache.json")
+    cache.put("default", "uhost-1", _host(), now=timestamp if timestamp is not None else 100)
+    data = json.loads(cache.path.read_text())
+    data["entries"]["default\0uhost-1"]["cached_at"] = timestamp
+    cache.path.write_text(json.dumps(data))
+    assert cache.get("default", "uhost-1", now=150) is None
+
+
+def test_non_utf8_cache_is_ignored(tmp_path) -> None:
+    path = tmp_path / "ssh-cache.json"
+    path.write_bytes(b"\xff\xfe")
+    assert SSHCredentialCache(path).get("default", "uhost-1") is None
+
+
+def test_cache_does_not_change_existing_parent_permissions(tmp_path) -> None:
+    tmp_path.chmod(0o755)
+    SSHCredentialCache(tmp_path / "ssh-cache.json").put("default", "uhost-1", _host())
+    assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o755
+
+
+@pytest.mark.parametrize("field", ["Region", "Zone", "SshLoginCommand", "Password"])
+def test_malformed_cached_host_is_ignored(tmp_path, field) -> None:
+    cache = SSHCredentialCache(tmp_path / "ssh-cache.json")
+    host = _host()
+    host[field] = {"invalid": "value"}
+    cache.put("default", "uhost-1", host, now=100)
+    assert cache.get("default", "uhost-1", now=150) is None
+
+
+@pytest.mark.parametrize("data", [[], {"version": 2, "entries": {}}, {"version": 1, "entries": []}])
+def test_invalid_cache_schema_is_ignored(tmp_path, data) -> None:
+    path = tmp_path / "ssh-cache.json"
+    path.write_text(json.dumps(data))
+    assert SSHCredentialCache(path).get("default", "uhost-1") is None
+
+
+def test_failed_cache_write_keeps_previous_credentials_and_removes_temporary_file(
+    monkeypatch, tmp_path
+) -> None:
+    cache = SSHCredentialCache(tmp_path / "private" / "ssh-cache.json")
+    cache.put("default", "uhost-1", _host("old-password"), now=100)
+    assert stat.S_IMODE(cache.path.parent.stat().st_mode) == 0o700
+
+    def fail(*_):
+        raise OSError("simulated replacement failure")
+
+    monkeypatch.setattr(type(cache.path), "replace", fail)
+    cache.put("default", "uhost-1", _host("new-password"), now=101)
+    assert cache.get("default", "uhost-1", now=150)["Password"] == "old-password"
+    assert list(cache.path.parent.iterdir()) == [cache.path]
+
+
+def test_password_protection_failure_disables_caching(monkeypatch, tmp_path) -> None:
+    cache = SSHCredentialCache(tmp_path / "ssh-cache.json")
+    monkeypatch.setattr(ssh_cache, "_protect_password", lambda _: None)
+    cache.put("default", "uhost-1", _host())
+    assert not cache.path.exists()
+
+
+def test_password_decryption_failure_is_a_cache_miss(monkeypatch, tmp_path) -> None:
+    cache = SSHCredentialCache(tmp_path / "ssh-cache.json")
+    cache.put("default", "uhost-1", _host(), now=100)
+    monkeypatch.setattr(ssh_cache, "_unprotect_password", lambda _: None)
+    assert cache.get("default", "uhost-1", now=150) is None

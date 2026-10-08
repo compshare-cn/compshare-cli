@@ -18,6 +18,16 @@ pip install compshare-cli
 pip install --upgrade compshare-cli
 ```
 
+## Skill
+
+为 Codex、Claude Code、Cursor 等 AI Agent 安装 CompShare CLI Skill：
+
+```bash
+npx skills add compshare-cn/compshare-cli --skill compshare-cli
+```
+
+完整说明见 [CompShare CLI Skill](skills/compshare-cli/SKILL.md)。
+
 ## 配置
 
 ```bash
@@ -42,9 +52,6 @@ export COMPSHARE_PRIVATE_KEY='...'
 export COMPSHARE_MINIMAX_API_KEY='sk-ml-...'
 ```
 
-CLI 使用统计和反馈与业务 API 一样，通过当前 profile 的凭证签名后发送到
-`https://api.compshare.cn/`；开发环境可使用 `COMPSHARE_INSIGHTS_URL` 覆盖网关地址。
-
 ## 快速开始
 
 ```bash
@@ -58,38 +65,15 @@ compshare instance ssh INSTANCE_ID
 compshare --json instance ssh INSTANCE_ID -- nvidia-smi
 compshare --json instance ssh INSTANCE_ID -- sh -lc 'cd /workspace && pwd'
 
-# 上传、下载文件或目录
-compshare --json instance cp INSTANCE_ID ./model.bin :/workspace/model.bin
-compshare --json instance cp INSTANCE_ID ./dataset :/workspace/dataset
-compshare --json instance cp INSTANCE_ID :/workspace/results ./results
-
 # MiniMax H3：先预演，再创建
 compshare --json minimax create '一只猫在海边奔跑' --dry-run
 compshare --json minimax create '一只猫在海边奔跑' --yes
 compshare --json minimax points
 
-# 图片：查看价格、创建任务、查询结果
-compshare --json minimax image config
-compshare --json minimax image create '一只戴着宇航头盔的猫' --resolution 1K --dry-run
-compshare --json minimax image create '一只戴着宇航头盔的猫' --resolution 1K --yes
-compshare --json minimax image show TASK_ID
-
-# 语音：先查询可用音色，再创建任务
-compshare --json minimax audio pricing
-compshare --json minimax audio voices
-compshare --json minimax audio create '你好，欢迎使用优云智算。' --voice-id VOICE_ID --dry-run
-compshare --json minimax audio create '你好，欢迎使用优云智算。' --voice-id VOICE_ID --yes
-
 # 查看帮助
 compshare -h
 compshare instance -h
 ```
-
-SSH 远程命令放在 `--` 后面，参数中的空格、引号和 `$` 会按原样传递；需要管道、重定向
-或 `&&` 时使用 `sh -lc '脚本'`。SSH 和文件传输共用一小时有效的连接缓存，重置密码或
-重装后可用 `--refresh` 强制刷新，`--no-cache` 禁用缓存。`--connect-timeout` 设置连接
-建立的最长时间（默认 30 秒），`ssh --timeout` 设置等待实例运行的时间；长任务使用
-`instance job`。
 
 ## 命令概览
 
@@ -104,16 +88,6 @@ compshare bandwidth  独享带宽和实例 EIP 带宽归属
 compshare minimax    MiniMax H3 视频、图片、语音、Skill 和积分
 compshare team       团队、邀请、成员额度、账单和审计
 ```
-
-## Skill
-
-为 Codex、Claude Code、Cursor 等 AI Agent 安装 CompShare CLI Skill：
-
-```bash
-npx skills add compshare-cn/compshare-cli --skill compshare-cli
-```
-
-完整说明见 [CompShare CLI Skill](skills/compshare-cli/SKILL.md)。
 
 ## WorkBuddy Connector
 

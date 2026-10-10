@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import tarfile
 import zipfile
@@ -32,6 +33,7 @@ def check_source(root: Path) -> str:
     init_text = (root / "src/compshare_cli/__init__.py").read_text(encoding="utf-8")
     changelog_text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     pyproject_text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    plugin_version = json.loads((root / "plugin.json").read_text(encoding="utf-8"))["version"]
 
     runtime_version = _extract(
         rf'^__version__\s*=\s*["\']({VERSION})["\']',
@@ -57,7 +59,10 @@ def check_source(root: Path) -> str:
         raise VersionConsistencyError(
             "pyproject.toml must derive package metadata from compshare_cli.__version__."
         )
-    _assert_versions(runtime_version, (("CHANGELOG.md", changelog_version),))
+    _assert_versions(
+        runtime_version,
+        (("CHANGELOG.md", changelog_version), ("plugin.json", plugin_version)),
+    )
     return runtime_version
 
 

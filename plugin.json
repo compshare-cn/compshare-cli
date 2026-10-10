@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "compshare-cli",
+  "version": "0.5.4",
+  "description": "Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the compshare CLI.",
+  "author": {
+    "name": "CompShare"
+  },
+  "repository": "https://github.com/compshare-cn/compshare-cli",
+  "license": "Apache-2.0",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "CompShare CLI",
+        "shortDescription": "Manage CompShare GPU and MiniMax H3 resources",
+        "developerName": "CompShare",
+        "defaultPrompt": [
+          "Use $compshare-cli:compshare-cli to manage CompShare GPU or MiniMax H3 resources safely."
+        ]
+      }
+    }
+  }
+}

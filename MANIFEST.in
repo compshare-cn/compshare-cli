@@ -1,4 +1,6 @@
 include CHANGELOG.md
 include RELEASING.md
+include plugin.json
+include .agents/plugins/marketplace.json
 recursive-include connector/compshare *.json *.md *.svg
 recursive-include skills *.md *.yaml

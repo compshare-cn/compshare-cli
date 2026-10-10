@@ -27,3 +27,18 @@ PyPI；失败时应发布新版本，不能覆盖已有文件。
 如果 GitHub Release 早于自动发布工作流，可以在 Actions 中手动运行
 `Publish to PyPI`，输入已有的 Release 标签补发。工作流会从该标签构建，避免同一版本
 混入标签之后的改动。
+
+## 公共插件市场
+
+确认插件改动已提交并推送到 GitHub 后，在仓库根目录创建上传包：
+
+```bash
+mkdir -p dist
+git archive --format=zip --output=dist/compshare-cli-plugin.zip HEAD \
+  plugin.json skills/compshare-cli connector/compshare/icon.svg LICENSE
+```
+
+上传包包含插件清单、Skill、图标和许可证。到
+[OpenAI Plugins](https://platform.openai.com/plugins) 选择已验证的开发者身份，上传 ZIP，
+等待元数据和 Skill 检查完成后提交审核。审核通过后再选择 `Publish plugin` 公开发布。
+完整流程见 [官方提交说明](https://developers.openai.com/plugins/deploy/submission)。

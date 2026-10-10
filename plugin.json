@@ -12,11 +12,20 @@
     "com.openai": {
       "interface": {
         "displayName": "CompShare CLI",
-        "shortDescription": "Manage CompShare GPU and MiniMax H3 resources",
+        "shortDescription": "GPU and AI media workflows",
+        "longDescription": "Manage CompShare GPU instances, images, disks, networking and teams. Connect over SSH, transfer files and run durable remote jobs. Create and inspect MiniMax H3 video, image and speech tasks. Requires Python 3.9 or later, the locally installed compshare-cli package and your own CompShare API credentials; media generation uses a separate model API key. Inspect prices and dry runs, and approve resource changes before execution.",
         "developerName": "CompShare",
+        "category": "Developer Tools",
+        "websiteURL": "https://github.com/compshare-cn/compshare-cli",
+        "supportURL": "https://github.com/compshare-cn/compshare-cli/issues",
+        "composerIcon": "./connector/compshare/icon.svg",
+        "logo": "./connector/compshare/icon.svg",
         "defaultPrompt": [
           "Use $compshare-cli:compshare-cli to manage CompShare GPU or MiniMax H3 resources safely."
         ]
+      },
+      "publication": {
+        "release_notes": "Initial Codex plugin release with the existing CompShare CLI skill for GPU resources, remote jobs and MiniMax H3 media tasks."
       }
     }
   }

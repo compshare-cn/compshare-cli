@@ -34,7 +34,7 @@ codex plugin list --marketplace compshare --json
 桌面端可重启后在插件目录的 `CompShare` 来源中找到并安装 `CompShare CLI`。
 Plugin 已包含 Skill，无需重复安装下面的独立 Skill。
 
-插件文件发布到 GitHub 后，也可以从任意目录安装：
+也可以从任意目录通过 GitHub 安装：
 
 ```bash
 codex plugin marketplace add compshare-cn/compshare-cli

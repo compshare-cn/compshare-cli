@@ -18,29 +18,6 @@ pip install compshare-cli
 pip install --upgrade compshare-cli
 ```
 
-## Codex Plugin
-
-仓库内置符合 [OpenAI 插件规范](https://developers.openai.com/plugins/build/plugins) 的
-Skill 插件，直接复用 `skills/compshare-cli`，通过本地 `compshare` 命令管理资源。
-先安装 CLI 并按下面的「配置」说明设置凭证，再在仓库根目录执行：
-
-```bash
-codex plugin marketplace add .
-codex plugin add compshare-cli@compshare
-codex plugin list --marketplace compshare --json
-```
-
-安装后开启新对话，使用 `$compshare-cli:compshare-cli`，例如「列出我所有运行中的 GPU 实例」。
-桌面端可重启后在插件目录的 `CompShare` 来源中找到并安装 `CompShare CLI`。
-Plugin 已包含 Skill，无需重复安装下面的独立 Skill。
-
-也可以从任意目录通过 GitHub 安装：
-
-```bash
-codex plugin marketplace add compshare-cn/compshare-cli
-codex plugin add compshare-cli@compshare
-```
-
 ## Skill
 
 为 Codex、Claude Code、Cursor 等 AI Agent 安装 CompShare CLI Skill：
@@ -128,6 +105,25 @@ compshare-mcp
 
 正式 Connector 使用 `uvx` 从 PyPI 安装固定版本，并将只读、预演和需要明确确认的写操作
 分开暴露。MiniMax H3 使用表单中可选的独立模型 API Key。
+
+## Codex Plugin
+
+仓库内置符合 [OpenAI 插件规范](https://developers.openai.com/plugins/build/plugins) 的
+Skill 插件，直接复用 `skills/compshare-cli`，通过本地 `compshare` 命令管理资源。
+先安装 CLI 并按「配置」说明设置凭证，再在仓库根目录执行：
+
+```bash
+codex plugin marketplace add .
+codex plugin add compshare-cli@compshare
+codex plugin list --marketplace compshare --json
+```
+
+也可以从任意目录通过 GitHub 安装：
+
+```bash
+codex plugin marketplace add compshare-cn/compshare-cli
+codex plugin add compshare-cli@compshare
+```
 
 ## SDK
 

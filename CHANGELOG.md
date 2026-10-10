@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.5.5
+
+- 新增 Codex Plugin 和 CompShare 插件市场配置，复用现有 CLI Skill，支持从 GitHub 安装；
+  将插件配置纳入源码包和发布版本一致性校验。
+- 精简 README 插件说明，将 Codex Plugin 章节移到 WorkBuddy Connector 下方、SDK 上方。
+
 ## 0.5.4
 
 - 修复 Windows 下 PowerShell 5.1/7 使用 GBK 代码页时中文 JSON 乱码或无法解析的问题，保持 UTF-8

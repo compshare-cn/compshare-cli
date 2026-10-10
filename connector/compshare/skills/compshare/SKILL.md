@@ -3,7 +3,7 @@ name: compshare
 description: Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the controlled CompShare MCP bridge.
 description_zh: 通过受控 CompShare MCP 桥接查询和管理优云智算 GPU 云资源及 MiniMax H3 视频、图片和语音任务。
 description_en: Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the controlled CompShare MCP bridge.
-version: "0.5.4"
+version: "0.5.5"
 author: "CompShare"
 ---
 

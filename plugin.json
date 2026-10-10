@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "compshare-cli",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the compshare CLI.",
   "author": {
     "name": "CompShare"

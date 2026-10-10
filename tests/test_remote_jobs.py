@@ -91,6 +91,7 @@ def test_protocol_parser_and_normalizer() -> None:
         parse_records("COMPSHARE_JOB_UNSUPPORTED\n")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires a local POSIX shell")
 def test_relative_xdg_state_home_falls_back_to_home(tmp_path) -> None:
     environment = os.environ.copy()
     environment.update({"HOME": str(tmp_path), "XDG_STATE_HOME": "relative/state"})
@@ -106,6 +107,7 @@ def test_relative_xdg_state_home_falls_back_to_home(tmp_path) -> None:
     assert (tmp_path / ".local" / "state" / "compshare" / "jobs").is_dir()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires a local POSIX shell")
 def test_submit_show_and_read_logs_with_xdg_state_directory(tmp_path) -> None:
     bin_directory = tmp_path / "bin"
     bin_directory.mkdir()
@@ -166,6 +168,7 @@ def test_submit_show_and_read_logs_with_xdg_state_directory(tmp_path) -> None:
     assert [record["JobId"] for record in parse_records(listed.stdout)] == ["job-test"]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires a local POSIX shell")
 def test_submit_is_idempotent_for_the_same_job_id(tmp_path) -> None:
     job_directory = tmp_path / "state" / "compshare" / "jobs" / "job-existing"
     job_directory.mkdir(parents=True)
@@ -206,6 +209,7 @@ def test_submit_is_idempotent_for_the_same_job_id(tmp_path) -> None:
         parse_records(cwd_conflict.stdout)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires a local POSIX shell")
 def test_prune_removes_only_old_terminal_jobs(tmp_path) -> None:
     jobs_root = tmp_path / "state" / "compshare" / "jobs"
     old_job = jobs_root / "job-old"

@@ -150,7 +150,10 @@ def _project_rows(
 
 def _write_json(payload: Dict[str, Any]) -> None:
     """Write one UTF-8 JSON document independently of the console code page."""
-    document = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+    # PowerShell can decode native pipes using a legacy Windows console code page.
+    document = (
+        json.dumps(payload, ensure_ascii=sys.platform == "win32", separators=(",", ":")) + "\n"
+    )
     stream = sys.stdout
     binary = getattr(stream, "buffer", None)
     if binary is not None:

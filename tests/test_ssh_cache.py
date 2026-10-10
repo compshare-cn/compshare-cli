@@ -1,4 +1,5 @@
 import json
+import os
 import stat
 
 import pytest
@@ -28,9 +29,14 @@ def test_ssh_cache_round_trip_is_profile_scoped_and_permission_restricted(tmp_pa
         key: value for key, value in _host().items() if key != "Unrelated"
     }
     assert cache.get("beta", "uhost-1", ttl=60, now=150) is None
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     saved = json.loads(path.read_text(encoding="utf-8"))
-    assert "Unrelated" not in next(iter(saved["entries"].values()))["host"]
+    saved_host = next(iter(saved["entries"].values()))["host"]
+    assert "Unrelated" not in saved_host
+    if os.name == "nt":
+        assert saved_host["Password"].startswith("dpapi:")
+        assert saved_host["Password"] != _host()["Password"]
 
 
 def test_ssh_cache_expires_and_can_be_deleted(tmp_path) -> None:
@@ -68,8 +74,9 @@ def test_non_utf8_cache_is_ignored(tmp_path) -> None:
 
 def test_cache_does_not_change_existing_parent_permissions(tmp_path) -> None:
     tmp_path.chmod(0o755)
+    permissions = stat.S_IMODE(tmp_path.stat().st_mode)
     SSHCredentialCache(tmp_path / "ssh-cache.json").put("default", "uhost-1", _host())
-    assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o755
+    assert stat.S_IMODE(tmp_path.stat().st_mode) == permissions
 
 
 @pytest.mark.parametrize("field", ["Region", "Zone", "SshLoginCommand", "Password"])
@@ -93,7 +100,8 @@ def test_failed_cache_write_keeps_previous_credentials_and_removes_temporary_fil
 ) -> None:
     cache = SSHCredentialCache(tmp_path / "private" / "ssh-cache.json")
     cache.put("default", "uhost-1", _host("old-password"), now=100)
-    assert stat.S_IMODE(cache.path.parent.stat().st_mode) == 0o700
+    if os.name != "nt":
+        assert stat.S_IMODE(cache.path.parent.stat().st_mode) == 0o700
 
     def fail(*_):
         raise OSError("simulated replacement failure")

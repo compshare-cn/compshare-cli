@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ from compshare_cli import ssh
 from compshare_cli.errors import CLIError, UsageError
 
 
+@pytest.mark.skipif(os.name == "nt", reason="pexpect requires POSIX")
 def test_connect_with_password_answers_split_prompt_once(monkeypatch) -> None:
     calls = []
     sent = []
@@ -68,6 +70,7 @@ def test_connect_with_password_answers_split_prompt_once(monkeypatch) -> None:
 
 
 def test_connect_with_password_requires_an_interactive_terminal(monkeypatch) -> None:
+    monkeypatch.setattr(ssh, "_is_windows", lambda: False)
     monkeypatch.setattr(ssh.sys, "stdin", SimpleNamespace(isatty=lambda: False))
 
     try:
@@ -382,7 +385,8 @@ def test_captured_password_authentication_cleans_up_on_failure(monkeypatch, runn
         password_file = Path(kwargs["env"][ssh._ASKPASS_PASSWORD_FILE_ENV])
         password_files.append(password_file)
         assert password_file.read_text() == "temporary-secret"
-        assert password_file.stat().st_mode & 0o777 == 0o600
+        if os.name != "nt":
+            assert password_file.stat().st_mode & 0o777 == 0o600
         raise OSError("test process failure")
 
     monkeypatch.setattr(ssh.subprocess, "run", run)

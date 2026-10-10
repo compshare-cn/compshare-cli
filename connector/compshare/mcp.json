@@ -7,7 +7,7 @@
         "--python",
         "3.11",
         "--from",
-        "compshare-cli[mcp]==0.5.3",
+        "compshare-cli[mcp]==0.5.4",
         "compshare-mcp"
       ],
       "env": {

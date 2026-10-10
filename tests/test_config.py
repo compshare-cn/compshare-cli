@@ -1,4 +1,5 @@
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -21,8 +22,9 @@ def test_profile_round_trip_and_file_permissions(monkeypatch, tmp_path) -> None:
     expected = Profile("public", "private")
     store.save_profile("testing", expected)
 
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
     assert store.load_profile("testing") == expected
     saved = json.loads(path.read_text(encoding="utf-8"))["profiles"]["testing"]
     assert set(saved) == {"public_key", "private_key"}

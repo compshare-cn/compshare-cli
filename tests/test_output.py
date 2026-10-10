@@ -53,6 +53,19 @@ def test_json_renderer_writes_utf8_bytes_under_a_gbk_stdout(monkeypatch) -> None
     }
 
 
+def test_windows_json_survives_legacy_powershell_pipe_decoding(monkeypatch) -> None:
+    raw = BytesIO()
+    monkeypatch.setattr(output.sys, "platform", "win32")
+    monkeypatch.setattr(output.sys, "stdout", TextIOWrapper(raw, encoding="gbk"))
+
+    Renderer(True).data({"value": "中文 😀"})
+
+    document = raw.getvalue()
+    assert document.isascii()
+    assert document.count(b"\n") == 1
+    assert json.loads(document.decode("gbk"))["data"]["value"] == "中文 😀"
+
+
 def test_json_renderer_reports_redacted_field_paths(capsys) -> None:
     Renderer(True).data({"Password": "secret", "IPSet": [{"IP": "203.0.113.1"}]})
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.4
+
+- 修复 Windows 下 PowerShell 5.1/7 使用 GBK 代码页时中文 JSON 乱码或无法解析的问题，保持 UTF-8
+  输出和原有 JSON 数据结构。
+- 适配 Windows 测试的平台条件，验证 DPAPI 凭证缓存加密，并完成监控、SSH、中文路径传输
+  和持久化远程任务的真实 PowerShell 回归。
+- Windows 经 SSH 会话嵌套调用 OpenSSH 仍可能挂起，独立 PowerShell 实测通过。
+
 ## 0.5.3
 
 - 恢复 `instance monitor`：自动定位实例地域并按最多 10 台分批查询，终端显示各设备最新

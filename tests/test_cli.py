@@ -55,6 +55,7 @@ def isolate_ssh_cache(monkeypatch, tmp_path) -> None:
         ["image", "--help"],
         ["storage", "--help"],
         ["storage", "disk", "--help"],
+        ["storage", "cfs", "--help"],
         ["bandwidth", "--help"],
         ["minimax", "--help"],
         ["team", "--help"],
@@ -117,7 +118,18 @@ def test_root_help_lists_config_first(capsys) -> None:
     assert "--lang" in help_text
     assert "│ lang " not in help_text
     assert "│ ask " not in help_text
-    assert help_text.index("config") < help_text.index("feedback") < help_text.index("doctor")
+    assert "feedback" not in help_text
+    assert help_text.index("config") < help_text.index("doctor")
+
+
+def test_feedback_command_is_removed(capsys) -> None:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--json", "feedback", "bug", "message"])
+
+    assert raised.value.code == 2
+    error = _json_error(capsys.readouterr().out)
+    assert error["code"] == "invalid_usage"
+    assert "feedback" in error["message"]
 
 
 def test_shell_completion_is_available() -> None:
@@ -972,7 +984,18 @@ def test_local_instance_template_crud() -> None:
     assert _json_data(deleted.stdout) == {"name": "训练配置"}
 
 
-def test_instance_create_loads_template_and_explicit_options_override(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "template_cfs,cfs_options,expected_cfs",
+    [
+        ("--cfs", [], True),
+        ("--cfs", ["--no-cfs"], False),
+        ("--no-cfs", ["--cfs"], True),
+        ("--no-cfs", [], False),
+    ],
+)
+def test_instance_create_loads_template_and_explicit_options_override(
+    monkeypatch, template_cfs, cfs_options, expected_cfs
+) -> None:
     saved = runner.invoke(
         cli.app,
         [
@@ -1001,6 +1024,7 @@ def test_instance_create_loads_template_and_explicit_options_override(monkeypatc
             "--max-count",
             "2",
             "--us3",
+            template_cfs,
         ],
     )
     assert saved.exit_code == 0, saved.output
@@ -1027,6 +1051,7 @@ def test_instance_create_loads_template_and_explicit_options_override(monkeypatc
             "--cpu",
             "16",
             "--no-us3",
+            *cfs_options,
             "--dry-run",
         ],
     )
@@ -1038,6 +1063,7 @@ def test_instance_create_loads_template_and_explicit_options_override(monkeypatc
     assert payload["request"]["CPU"] == 16
     assert payload["request"]["MaxCount"] == 2
     assert "EnableUS3" not in payload["request"]
+    assert payload["request"]["EnableCfs"] is expected_cfs
     assert [action for action, _ in calls] == [
         "CheckCompShareResourceCapacity",
         "GetCompShareInstancePrice",

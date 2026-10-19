@@ -268,6 +268,7 @@ Discover subcommands first, then inspect the exact operation:
 compshare --json image --help
 compshare --json storage --help
 compshare --json storage disk --help
+compshare --json storage cfs --help
 compshare --json bandwidth --help
 compshare --json team --help
 ```
@@ -278,11 +279,41 @@ Common entry points:
 image list/show/create/progress/update/delete/share/unshare/publish
 storage disk list/create/attach/detach/price/resize/delete
 storage us3 attach
+storage cfs list/show/price/create/resize-price/resize/refund/delete/attach/detach
 team list/joined/show/create/update/delete/audit
 team invite/member/quota/billing
 ```
 
 Treat image deletion, disk deletion, disk detach/resize, quota changes and team mutations as state-changing operations. Read the current resource and request confirmation before adding `--yes` where supported.
+
+### CFS file storage
+
+CFS is available in container zones reported by `instance zones` (`IsPod=true`). Each account
+can have one CFS resource per zone, shared by its container instances. Capacity is 50-2048 GiB;
+new purchases support `Month`, `Year`, `Day` and `Dynamic`, and expansion cannot shrink storage.
+
+```bash
+compshare --json storage cfs list
+compshare --json storage cfs show CFS_ID
+compshare --json storage cfs create --name training --size 100GiB \
+  --region cn-bj2 --zone cn-bj2-03 --dry-run
+compshare --json storage cfs resize CFS_ID --size 200GiB \
+  --region cn-bj2 --zone cn-bj2-03 --dry-run
+compshare --json storage cfs delete CFS_ID \
+  --region cn-bj2 --zone cn-bj2-03 --dry-run
+compshare --json storage cfs attach --instance CPOD_ID --dry-run
+```
+
+Review the quote or operation plan before replacing `--dry-run` with `--yes`. Prices are in
+CNY. Resource queries and purchases accept `--project ID` when a non-default project is needed.
+Attaching CFS may automatically purchase 50 GiB for one month if none exists in the zone.
+Attaching or detaching CFS on a running instance can restart it; save work before confirming.
+The existing `storage us3 attach` command has the same behavior for `cpod-` instances.
+
+`instance create --cfs` and `instance template create --cfs` enable attachment of an existing
+CFS in that zone. They do not purchase CFS if none exists. Use `--no-cfs` to override a template.
+Back up data and detach instances before deleting CFS. `delete --recycle` may detach stopped
+instances first; it still refuses to delete storage mounted by a running instance.
 
 ## MiniMax H3 media tasks
 
@@ -324,6 +355,9 @@ compshare --json minimax cancel TASK_ID --yes
 
 For images, inspect current pricing before creating a task. Each request creates one image:
 
+The default resolution is 1K. 2K requests are accepted only when that tier is enabled in
+`minimax image config`; a `null` price means the tier is unavailable.
+
 ```bash
 compshare --json minimax image config
 compshare --json minimax image list --status queued
@@ -357,14 +391,13 @@ Generated image and speech URLs stay redacted unless the user explicitly needs t
 `--show-sensitive` is added as a root option. Download speech output promptly; the API retains
 it for seven days. Deleting a finished task also removes its output.
 
-## Diagnostics and feedback
+## Diagnostics
 
 ```bash
 compshare --json doctor
-compshare feedback bug '创建实例时发生错误'
 ```
 
-Use `doctor` for local configuration, authentication, network and SSH environment checks. Use `feedback` only when the user asks to send feedback; it performs an external write.
+Use `doctor` for local configuration, authentication, network and SSH environment checks.
 
 ## JSON contract
 

@@ -12,7 +12,6 @@ from typer.main import get_command
 from compshare_cli import __version__
 from compshare_cli.commands import bandwidth, image, instance, minimax, storage, team
 from compshare_cli.commands import doctor as doctor_command
-from compshare_cli.commands import feedback as feedback_command
 from compshare_cli.commands.common import confirm
 from compshare_cli.config import DEFAULT_PROFILE, ConfigStore, Profile
 from compshare_cli.errors import CLIError, ConfigError, UsageError
@@ -36,7 +35,7 @@ completion_init()
 class RootGroup(typer_core.TyperGroup):
     def list_commands(self, ctx):
         names = super().list_commands(ctx)
-        preferred = ("config", "feedback", "doctor")
+        preferred = ("config", "doctor")
         return [
             *(name for name in preferred if name in names),
             *(name for name in names if name not in preferred),
@@ -305,22 +304,6 @@ def version(ctx: typer.Context) -> None:
 def doctor(ctx: typer.Context) -> None:
     """Diagnose the CLI configuration and environment."""
     doctor_command.run(ctx.find_root().obj)
-
-
-@app.command("feedback")
-def feedback(
-    ctx: typer.Context,
-    category: feedback_command.FeedbackCategory = typer.Argument(
-        ...,
-        help="Feedback category: bug or suggest.",
-    ),
-    message: str = typer.Argument(
-        ...,
-        help="Feedback message; limited to 2000 characters.",
-    ),
-) -> None:
-    """Send feedback about the CLI."""
-    feedback_command.run(ctx.find_root().obj, category, message)
 
 
 def _global_flag_requested(argv: List[str], option: str) -> bool:

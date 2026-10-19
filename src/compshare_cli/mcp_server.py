@@ -48,6 +48,11 @@ _READ_COMMANDS = {
     ("image", "tags"),
     ("storage", "disk", "list"),
     ("storage", "disk", "price"),
+    ("storage", "cfs", "list"),
+    ("storage", "cfs", "show"),
+    ("storage", "cfs", "price"),
+    ("storage", "cfs", "resize-price"),
+    ("storage", "cfs", "refund"),
     ("bandwidth", "list"),
     ("bandwidth", "instances"),
     ("minimax", "show"),
@@ -75,7 +80,6 @@ _READ_COMMANDS = {
 }
 
 _WRITE_COMMANDS = {
-    ("feedback",),
     ("instance", "create"),
     ("instance", "start"),
     ("instance", "stop"),
@@ -111,6 +115,11 @@ _WRITE_COMMANDS = {
     ("storage", "disk", "resize"),
     ("storage", "disk", "delete"),
     ("storage", "us3", "attach"),
+    ("storage", "cfs", "create"),
+    ("storage", "cfs", "resize"),
+    ("storage", "cfs", "delete"),
+    ("storage", "cfs", "attach"),
+    ("storage", "cfs", "detach"),
     ("bandwidth", "create"),
     ("bandwidth", "resize"),
     ("bandwidth", "delete"),
@@ -150,6 +159,12 @@ _BLOCKED_COMMAND_PREFIXES = {
     ("team", "billing", "export"),
 }
 _DRY_RUN_COMMANDS = {
+    ("storage", "us3", "attach"),
+    ("storage", "cfs", "create"),
+    ("storage", "cfs", "resize"),
+    ("storage", "cfs", "delete"),
+    ("storage", "cfs", "attach"),
+    ("storage", "cfs", "detach"),
     ("instance", "create"),
     ("instance", "resize"),
     ("instance", "charge"),

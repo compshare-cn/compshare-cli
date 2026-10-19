@@ -942,6 +942,11 @@ def create_template(
         "--us3/--no-us3",
         help="Attach US3 during container creation.",
     ),
+    cfs: Optional[bool] = typer.Option(
+        None,
+        "--cfs/--no-cfs",
+        help="Attach existing CFS during container creation; does not purchase storage.",
+    ),
     force: bool = typer.Option(False, "--force", help="Replace an existing template."),
 ) -> None:
     if memory is not None:
@@ -971,6 +976,7 @@ def create_template(
             "firewall": firewall,
             "max_count": max_count,
             "us3": us3,
+            "cfs": cfs,
         }
     )
     state = runtime(ctx)
@@ -1339,6 +1345,11 @@ def create(
         "--us3/--no-us3",
         help="Attach US3 during container creation.",
     ),
+    cfs: Optional[bool] = typer.Option(
+        None,
+        "--cfs/--no-cfs",
+        help="Attach existing CFS during container creation; does not purchase storage.",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -1384,6 +1395,7 @@ def create(
     firewall = firewall if firewall is not None else template_parameters.get("firewall")
     max_count = max_count if max_count is not None else template_parameters.get("max_count")
     us3 = us3 if us3 is not None else template_parameters.get("us3")
+    cfs = cfs if cfs is not None else template_parameters.get("cfs")
 
     resolved_quantity = int(quantity if quantity is not None else 1)
     resolved_platform = str(platform if platform is not None else "Auto")
@@ -1519,6 +1531,7 @@ def create(
                 "SecurityGroupId": firewall,
                 "MaxCount": resolved_max_count,
                 "EnableUS3": resolved_us3 if resolved_us3 else None,
+                "EnableCfs": cfs,
             }
         )
     )

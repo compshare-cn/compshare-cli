@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.6
+
+- 移除 `compshare feedback` 命令及反馈提交功能。
+- 将图片创建的默认分辨率改为 1K，避免默认请求尚未开放的 2K 档位。
+- 新增 `storage cfs` 的查询、询价、创建、挂载、卸载、扩容、退费预估和删除命令，
+  以及创建实例和本地模板的 `--cfs/--no-cfs` 选项；同步 MCP、Skill 和递归接口覆盖检查。
+- 为容器的 CFS 挂载增加预演、费用及重启提示和确认，保留普通 US3 挂载用法。
+
 ## 0.5.5
 
 - 新增 Codex Plugin 和 CompShare 插件市场配置，复用现有 CLI Skill，支持从 GitHub 安装；

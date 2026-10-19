@@ -613,7 +613,7 @@ def image_config(ctx: typer.Context) -> None:
 def image_create(
     ctx: typer.Context,
     prompt: str = typer.Argument(..., help="Image prompt; at most 7000 characters."),
-    resolution: str = typer.Option("2K", help="Image resolution: 1K or 2K."),
+    resolution: str = typer.Option("1K", help="Image resolution: 1K or 2K."),
     ratio: str = typer.Option("1:1", help="Image aspect ratio."),
     reference_assets: Optional[List[str]] = typer.Option(
         None, "--reference-asset", help="Registered reference image asset ID; repeatable."

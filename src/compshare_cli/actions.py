@@ -58,10 +58,18 @@ STORAGE_ACTIONS = frozenset(
         "AttachCompshareDisk",
         "AttachUS3",
         "CreateAndAttachCompshareDisk",
+        "CreateCFS",
+        "DeleteCFS",
         "DeleteCompshareDisk",
+        "DescribeCFS",
         "DescribeCompshareDisk",
+        "DetachCFS",
         "DetachCompshareDisk",
         "GetCompShareAttachedDiskUpgradePrice",
+        "GetCompShareCFSPrice",
+        "GetCompShareCFSRefundPrice",
+        "GetCompShareCFSUpgradePrice",
+        "ResizeCFS",
         "ResizeCompShareDisk",
     }
 )

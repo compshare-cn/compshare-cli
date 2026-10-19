@@ -3,13 +3,13 @@ name: compshare
 description: Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the controlled CompShare MCP bridge.
 description_zh: 通过受控 CompShare MCP 桥接查询和管理优云智算 GPU 云资源及 MiniMax H3 视频、图片和语音任务。
 description_en: Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the controlled CompShare MCP bridge.
-version: "0.5.5"
+version: "0.5.6"
 author: "CompShare"
 ---
 
 # CompShare 优云智算
 
-通过本 Connector 提供的 MCP 工具查询和管理 GPU 实例、镜像、云盘、US3、独享带宽、
+通过本 Connector 提供的 MCP 工具查询和管理 GPU 实例、镜像、云盘、US3、CFS、独享带宽、
 团队资源与 MiniMax H3 视频、图片和语音任务。凭证由 WorkBuddy Token 表单注入；不要要求用户在对话中
 发送公钥、私钥或模型 API Key。
 
@@ -151,6 +151,12 @@ JSON 创建至少提供 GPU、每实例 GPU 数、CPU、内存、镜像、Region
   收藏变更为写操作。发布社区镜像前确认其中不含密钥、密码或用户数据。
 - 云盘 `list/price` 为只读；创建、挂载、卸载、扩容和删除为写操作。卸载前提醒用户先在
   实例内卸载文件系统；云盘只能扩容，不能缩容。
+- CFS 使用 `storage cfs`：`list/show/price/resize-price/refund` 为只读；创建、扩容、删除、
+  挂载和卸载为写操作，对应的 `--dry-run` 走只读工具。购买容量为 50-2048 GiB，先预演询价。
+  给 `cpod-` 实例挂载时，如可用区内尚无 CFS，会自动购买 50 GiB、按月计费 1 个周期的存储；
+  运行中的实例挂载或卸载可能重启。现有 `storage us3 attach` 对容器也有相同行为，必须先告知
+  费用与中断影响、获得用户同意，再使用 `--yes`。创建实例的 `--cfs` 只挂载已有 CFS，不自动购买。
+- CFS 删除前先备份并卸载实例；`delete --recycle` 只允许自动卸载已停止实例，仍拒绝运行中的挂载。
 - 独享带宽 `list/instances` 为只读。购买、改配和删除先通过 `--dry-run` 询价或查看退款，
   再确认执行。购买后已有实例不会自动切换带宽。
 - 团队列表、详情、成员、账单和审计为只读；团队、邀请、成员备注和额度变更为写操作。
@@ -166,6 +172,8 @@ MiniMax 使用 Token 表单中的独立 `COMPSHARE_MINIMAX_API_KEY`。缺失时�
 `minimax audio voices`；再用相应的 `create --dry-run` 预演。展示分辨率、时长、比例、
 素材及费用影响后确认，使用相同幂等键调用写工具正式创建。重试不确定请求时必须复用
 原幂等键。取消、删除任务和上传参考素材也属于写操作。
+
+图片默认使用 1K；2K 以配置接口返回的价格是否存在为准，价格为 `null` 时不要提交。
 
 视频素材支持公开 URL 或 Data URL；图片和语音参考素材通过 `image upload`、
 `audio upload` 登记后使用资产 ID。生成结果 URL 默认脱敏；不要为了显示它而绕过连接器

@@ -427,6 +427,55 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Remove an image from favorites.": "取消收藏镜像。",
     "List available image tags.": "列出可用的镜像标签。",
     "Manage disks and cloud storage.": "管理磁盘和云存储。",
+    "Manage CFS file storage for container instances.": "管理容器实例的云存储 Pro（CFS）。",
+    "List CFS file storage without pagination.": "查询全部 CFS，无需分页。",
+    "Show a CFS resource and its mounted instances.": "查看 CFS 详情及挂载实例。",
+    "Query the CFS purchase price in CNY.": "查询 CFS 购买价格，单位元。",
+    "Purchase CFS storage after quoting the price.": "询价后购买 CFS。",
+    "Query the CFS expansion price in CNY.": "查询 CFS 扩容价格，单位元。",
+    "Expand CFS storage after quoting the price.": "询价后扩容 CFS。",
+    "Query the estimated CFS refund in CNY.": "查询 CFS 预计退费金额，单位元。",
+    "Permanently delete CFS storage after quoting the refund.": "预估退费后永久删除 CFS。",
+    "Attach CFS; may purchase storage and restart the instance.": (
+        "挂载 CFS，可能购买存储并重启实例。"
+    ),
+    "Detach CFS; running instances will restart.": "卸载 CFS，运行中的实例会重启。",
+    "Attach existing CFS during container creation; does not purchase storage.": (
+        "创建容器实例时挂载已有 CFS，不会购买存储。"
+    ),
+    "CFS ID.": "CFS ID。",
+    "CFS name.": "CFS 名称。",
+    "CFS capacity, for example 100GiB (50-2048 GiB).": "CFS 容量，例如 100GiB（50-2048 GiB）。",
+    "Target CFS capacity, not an increment (50-2048 GiB).": (
+        "扩容后的 CFS 总容量，非增量（50-2048 GiB）。"
+    ),
+    "CFS name cannot be empty.": "CFS 名称不能为空。",
+    "CFS size must be between 50 and 2048 GiB.": "CFS 容量必须在 50 到 2048 GiB 之间。",
+    "CFS requires a container availability zone.": "CFS 仅支持容器可用区。",
+    "CFS attachments require a cpod- instance ID.": "CFS 挂载和卸载需要 cpod- 开头的实例 ID。",
+    "Project ID.": "项目 ID。",
+    "Quote and show the request only.": "仅询价并展示请求。",
+    "Detach stopped instances before deleting CFS.": "删除 CFS 前先卸载已停止实例的挂载。",
+    "Submitted CFS attachment for {instance}": "已为 {instance} 提交 CFS 挂载请求",
+    "Attach CFS to {instance}? If none exists in this zone, this purchases 50 GiB "
+    "for one month. Running instances may restart; save your work first.": (
+        "确认给 {instance} 挂载 CFS？若该可用区尚无 CFS，将购买 50 GiB、按月计费 1 个周期的存储。"
+        "运行中的实例可能重启，请先保存任务。"
+    ),
+    "Detach CFS from {instance}? Running instances will restart; save your work first.": (
+        "确认从 {instance} 卸载 CFS？运行中的实例会重启，请先保存任务。"
+    ),
+    "Permanently delete CFS {cfs} and all its data? Back up your data first.": (
+        "确认永久删除 CFS {cfs} 及其全部数据？请先备份。"
+    ),
+    "CFS ID": "CFS ID",
+    "ZONE ID": "可用区 ID",
+    "SIZE (GiB)": "容量（GiB）",
+    "MOUNT STATUS": "挂载状态",
+    "INSTANCES": "实例",
+    "RECYCLE": "删除前卸载已停止实例",
+    "PRICE (CNY)": "价格（元）",
+    "REFUND (CNY)": "退费（元）",
     "Manage instance disks.": "管理实例云盘。",
     "List attached and detached disks from the disk inventory.": "列出已挂载和未挂载的云盘。",
     "List disks reported by one or all instances.": "列出一个或全部实例的磁盘。",
@@ -955,19 +1004,6 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Export team orders to a CSV file.": "将团队订单导出为 CSV 文件。",
     "List team operation logs.": "列出团队操作日志。",
     "Diagnose the CLI configuration and environment.": "诊断 CLI 配置和运行环境。",
-    "Send feedback about the CLI.": "反馈 CLI 问题或建议。",
-    "Feedback category: bug or suggest.": "反馈分类：bug 或 suggest。",
-    "Feedback message; limited to 2000 characters.": "反馈内容，最多 2000 个字符。",
-    "Feedback category must be bug or suggest.": "反馈分类必须是 bug 或 suggest。",
-    "Feedback message cannot be empty.": "反馈内容不能为空。",
-    "Feedback message cannot exceed 2000 characters.": "反馈内容不能超过 2000 个字符。",
-    "Feedback service is not configured; set {variable}.": (
-        "反馈服务尚未配置，请设置 {variable}。"
-    ),
-    "Insights service rejected the request: {detail}": "数据服务拒绝了请求：{detail}",
-    "Unable to reach the insights service.": "无法连接数据服务。",
-    "Insights service returned an invalid response.": "数据服务返回了无效响应。",
-    "Thank you for your feedback.": "感谢反馈。",
     "Team ID.": "团队 ID。",
     "Team name.": "团队名称。",
     "Team description.": "团队简介。",

@@ -19,11 +19,13 @@ def test_template_store_round_trip_and_permissions(tmp_path) -> None:
             "count": 1,
             "data_disk": ["200GiB:CLOUD_SSD"],
             "us3": False,
+            "cfs": True,
         },
         description="training",
     )
 
     assert saved["name"] == "训练配置"
+    assert store.get("训练配置")["parameters"]["cfs"] is True
     assert store.get("训练配置")["parameters"]["data_disk"] == ["200GiB:CLOUD_SSD"]
     assert [item["name"] for item in store.list()] == ["训练配置"]
     if os.name != "nt":
@@ -50,6 +52,8 @@ def test_template_store_rejects_unknown_or_invalid_parameters(tmp_path) -> None:
         store.save("bad", {"password": "secret"})
     with pytest.raises(ConfigError, match="positive integer"):
         store.save("bad", {"count": 0})
+    with pytest.raises(ConfigError, match="boolean"):
+        store.save("bad", {"cfs": "true"})
     with pytest.raises(UsageError, match="at least one"):
         store.save("empty", {})
 

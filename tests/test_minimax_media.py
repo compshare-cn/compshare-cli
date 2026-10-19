@@ -28,7 +28,8 @@ def api_key(monkeypatch):
     monkeypatch.setenv("COMPSHARE_MINIMAX_API_KEY", "sk-ml-test")
 
 
-def test_image_create_sends_documented_payload(monkeypatch):
+@pytest.mark.parametrize("resolution", [[], ["--resolution", "1K"]])
+def test_image_create_sends_documented_payload(monkeypatch, resolution):
     captured = {}
 
     def fake_urlopen(req, timeout):
@@ -49,8 +50,7 @@ def test_image_create_sends_documented_payload(monkeypatch):
             "image",
             "create",
             "一只猫",
-            "--resolution",
-            "1K",
+            *resolution,
             "--ratio",
             "16:9",
             "--reference-asset",

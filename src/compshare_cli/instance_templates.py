@@ -32,7 +32,7 @@ TEXT_PARAMETERS = frozenset(
 )
 INTEGER_PARAMETERS = frozenset({"count", "cpu", "quantity", "max_count"})
 LIST_PARAMETERS = frozenset({"data_disk"})
-BOOLEAN_PARAMETERS = frozenset({"us3"})
+BOOLEAN_PARAMETERS = frozenset({"us3", "cfs"})
 TEMPLATE_PARAMETERS = TEXT_PARAMETERS | INTEGER_PARAMETERS | LIST_PARAMETERS | BOOLEAN_PARAMETERS
 
 

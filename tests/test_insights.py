@@ -3,58 +3,9 @@ import json
 
 import pytest
 from typer.main import get_command
-from typer.testing import CliRunner
-from ucloud.core import exc as ucloud_exc
 
 from compshare_cli import __version__, cli, insights
 from compshare_cli.config import Profile
-from compshare_cli.errors import CLIError
-
-runner = CliRunner()
-
-
-def test_feedback_posts_category_and_message(monkeypatch) -> None:
-    captured = {}
-
-    def fake_invoke(profile, action, payload):
-        captured["profile"] = profile
-        captured["action"] = action
-        captured["payload"] = payload
-        return {"Id": "feedback-7"}
-
-    monkeypatch.setenv("COMPSHARE_PUBLIC_KEY", "public")
-    monkeypatch.setenv("COMPSHARE_PRIVATE_KEY", "private")
-    monkeypatch.setattr(insights, "_invoke", fake_invoke)
-    result = runner.invoke(
-        cli.app,
-        ["--json", "feedback", "bug", "创建实例失败"],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == {
-        "ok": True,
-        "schema_version": "1",
-        "data": {"id": "feedback-7"},
-    }
-    assert captured["profile"] == Profile("public", "private")
-    assert captured["action"] == "CreateCSCLIFeedback"
-    assert captured["payload"]["Category"] == "bug"
-    assert captured["payload"]["Content"] == "创建实例失败"
-    assert set(captured["payload"]) == {
-        "Category",
-        "Content",
-        "CLIVersion",
-        "OS",
-        "OccurredAt",
-    }
-
-
-def test_feedback_only_accepts_bug_or_suggest() -> None:
-    result = runner.invoke(cli.app, ["feedback", "other", "message"])
-
-    assert result.exit_code == 2
-    assert "bug" in result.output
-    assert "suggest" in result.output
 
 
 def test_insights_uses_external_gateway_by_default(monkeypatch) -> None:
@@ -69,30 +20,15 @@ def test_insights_uses_external_gateway_by_default(monkeypatch) -> None:
         def invoke(self, action, payload):
             captured["action"] = action
             captured["payload"] = payload
-            return {"Id": "feedback-8"}
+            return {"Id": "event-8"}
 
     monkeypatch.delenv("COMPSHARE_INSIGHTS_URL", raising=False)
     monkeypatch.setattr(insights, "CompShareSDK", FakeSDK)
-    response = insights.submit_feedback(Profile("public", "private"), "suggest", "建议内容")
+    response = insights._invoke(Profile("public", "private"), "CreateCSCLIEvent", {})
 
-    assert response == {"ok": True, "id": "feedback-8"}
+    assert response == {"Id": "event-8"}
     assert captured["base_url"] == "https://api.compshare.cn"
-    assert captured["action"] == "CreateCSCLIFeedback"
-
-
-def test_feedback_formats_gateway_rejection(monkeypatch) -> None:
-    def reject(*_args):
-        raise ucloud_exc.RetCodeException(
-            action="CreateCSCLIFeedback",
-            code=1001,
-            message="invalid request body",
-            request_uuid="request-1",
-        )
-
-    monkeypatch.setattr(insights, "_invoke", reject)
-
-    with pytest.raises(CLIError, match="invalid request body"):
-        insights.submit_feedback(Profile("public", "private"), "suggest", "建议内容")
+    assert captured["action"] == "CreateCSCLIEvent"
 
 
 def test_telemetry_contains_only_requested_fields(monkeypatch) -> None:
@@ -172,7 +108,7 @@ def test_event_worker_posts_to_event_endpoint(monkeypatch) -> None:
             "team.billing.export",
         ),
         (["--json", "--show-sensitive", "instance", "show", "uhost-1"], "instance.show"),
-        (["feedback", "suggest", "message"], "feedback"),
+        (["feedback", "suggest", "message"], None),
         (["instance", "--help"], None),
         ([], None),
     ],

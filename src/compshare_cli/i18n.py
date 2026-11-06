@@ -120,9 +120,6 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     ),
     "{option} may be specified at most {maximum} times.": ("{option} 最多可指定 {maximum} 次。"),
     "At most 12 reference inputs are allowed.": "参考素材合计最多 12 个。",
-    "Reference audio requires a reference image or video.": (
-        "参考音频需要同时指定参考图片或视频。"
-    ),
     "Unsupported video model: {model}.": "不支持的视频模型：{model}。",
     "--resolution must be 480P, 768P, 1080P, 2K, or 4K.": (
         "--resolution 必须是 480P、768P、1080P、2K 或 4K。"

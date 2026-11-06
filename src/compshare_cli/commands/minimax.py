@@ -190,8 +190,6 @@ def _content(
         raise UsageError(tr("Prompt cannot be empty."))
     if sum(map(len, (reference_images, reference_videos, reference_audio))) > 12:
         raise UsageError(tr("At most 12 reference inputs are allowed."))
-    if reference_audio and not (reference_images or reference_videos):
-        raise UsageError(tr("Reference audio requires a reference image or video."))
     limits = (
         (reference_images, 9, "--reference-image"),
         (reference_videos, 3, "--reference-video"),
@@ -960,7 +958,7 @@ def audio_upload(
     ctx: typer.Context,
     file: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
     duration_ms: int = typer.Option(
-        ..., min=500, max=15000, help="Actual duration in milliseconds."
+        ..., min=500, max=30000, help="Actual duration in milliseconds."
     ),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ) -> None:

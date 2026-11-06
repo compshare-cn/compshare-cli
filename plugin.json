@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "compshare-cli",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the compshare CLI.",
   "author": {
     "name": "CompShare"
@@ -25,7 +25,7 @@
         ]
       },
       "publication": {
-        "release_notes": "Adds CFS storage workflows and instance template options, confirms container storage purchases and restarts, defaults image creation to 1K, and removes the feedback command."
+        "release_notes": "Allows audio-only references for MiniMax H3 video, extends IndexTTS speech reference uploads to 30 seconds, and updates media limits, fees, and retention guidance."
       }
     }
   }

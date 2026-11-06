@@ -186,7 +186,7 @@ def test_audio_create_rejects_invalid_options(args):
         (
             "audio",
             "reference.wav",
-            ["--duration-ms", "5000"],
+            ["--duration-ms", "30000"],
             {
                 "upload_url": "https://upload.example.com/reference.wav?signature=secret",
                 "object_key": "audio-key",
@@ -230,7 +230,34 @@ def test_reference_upload_uses_signed_url_then_registers(
         assert registered["height"] == 20
     else:
         assert "Authorization" not in calls[1][2]
-        assert registered["duration_ms"] == 5000
+        assert registered["duration_ms"] == 30000
+
+
+@pytest.mark.parametrize("duration_ms", [499, 30001])
+def test_audio_upload_rejects_out_of_range_duration(monkeypatch, tmp_path, duration_ms):
+    file = tmp_path / "reference.wav"
+    file.write_bytes(b"test-data")
+    monkeypatch.setattr(
+        minimax.request,
+        "urlopen",
+        lambda *args, **kwargs: pytest.fail("invalid duration called the API"),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "minimax",
+            "audio",
+            "upload",
+            str(file),
+            "--duration-ms",
+            str(duration_ms),
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 2
 
 
 def test_video_skill_create_uses_documented_endpoint(monkeypatch):

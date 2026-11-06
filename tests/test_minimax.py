@@ -116,8 +116,50 @@ def test_video_media_only_and_reference_limits() -> None:
     ]
     with pytest.raises(UsageError, match="12"):
         minimax._content("prompt", None, None, ["image"] * 9, ["video"] * 3, ["audio"])
-    with pytest.raises(UsageError):
-        minimax._content("prompt", None, None, [], [], ["audio"])
+    with pytest.raises(UsageError, match="3"):
+        minimax._content("prompt", None, None, [], [], ["audio"] * 4)
+
+
+@pytest.mark.parametrize("prompt", ["", "参考音频的海浪声生成海边画面"])
+@pytest.mark.parametrize("context_options", [[], ["--no-context-ir"]])
+def test_create_accepts_audio_only_reference_without_context_ir(
+    monkeypatch, prompt, context_options
+) -> None:
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured.update(json.loads(req.data))
+        return FakeResponse({"task_id": "task-audio-reference"})
+
+    monkeypatch.setattr(minimax.request, "urlopen", fake_urlopen)
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "minimax",
+            "create",
+            *([prompt] if prompt else []),
+            "--reference-audio",
+            "https://example.com/ocean.wav",
+            "--duration",
+            "30",
+            *context_options,
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    expected_content = [{"type": "text", "text": prompt}] if prompt else []
+    expected_content.append(
+        {
+            "type": "audio_url",
+            "audio_url": {"url": "https://example.com/ocean.wav"},
+            "role": "reference_audio",
+        }
+    )
+    assert captured["content"] == expected_content
+    assert captured["duration"] == 30
+    assert "use_context_ir" not in captured
 
 
 def test_video_new_options_follow_api_contract() -> None:

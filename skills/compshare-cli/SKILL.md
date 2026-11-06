@@ -340,10 +340,24 @@ compshare --json minimax create 'A sailboat crossing a golden sea' \
 
 Use `--first-frame` and `--last-frame` for frame-driven video, or repeat
 `--reference-image`, `--reference-video` and `--reference-audio` for reference-driven video.
-Video supports 480P, 768P, 1080P, 2K and 4K and durations from 4 to 30 seconds. Use
-`minimax skill list` to find a Skill, then pass both `--context-ir` and `--skill-id`.
-Video inputs may use publicly accessible URLs or Data URLs. For callbacks, pass `--callback-url` and set
-`COMPSHARE_MINIMAX_CALLBACK_TOKEN` if the receiver validates a token.
+Audio references can be used alone, with or without a text prompt. Frame inputs cannot be
+combined with reference inputs. Reference inputs allow up to 9 images, 3 videos and 3 audio
+clips, with at most 12 in total.
+
+Video supports 480P, 768P, 1080P, 2K and 4K and durations from 4 to 30 seconds, generated in
+one pass even with video references. `--context-ir` is optional for every duration and off by
+default; it is strongly recommended and adds 5 points per task. Use `minimax skill list` to
+find a Skill, then pass both `--context-ir` and `--skill-id`.
+
+Video inputs may use publicly accessible URLs or Data URLs. Images must be at most 30 MiB,
+with each dimension between 256 and 5760 pixels and a width/height ratio between 0.4 and 2.5.
+Reference videos allow at most 50 MiB per file; reference audio allows 15 MiB. Each video or
+audio clip must be 2-15.08 seconds long, and each media type has a separate total duration
+limit of 15.08 seconds. Input limits are independent of the output video duration.
+Video references add 5 points per input second at 480P or 10 at higher resolutions, with
+durations summed before rounding up to whole seconds. Image and audio references add no
+input fee. For callbacks, pass `--callback-url` and set `COMPSHARE_MINIMAX_CALLBACK_TOKEN`
+if the receiver validates a token.
 Generated video URLs stay redacted unless the user explicitly needs them and `--show-sensitive`
 is added as a root option.
 
@@ -385,11 +399,16 @@ compshare --json minimax audio show TASK_ID
 ```
 
 For an authorized reference recording, `minimax audio upload FILE --duration-ms MS --yes`
-returns an asset ID. Use `--voice-source asset --asset-id ASSET_ID`, or save it with
+accepts 500-30000 milliseconds and at most 15 MiB, and returns an asset ID. These speech
+reference limits differ from the audio references used for video generation above.
+Use `--voice-source asset --asset-id ASSET_ID`, or save it with
 `minimax audio voice-create ASSET_ID NAME --yes` and then use `--voice-source custom --voice-id VOICE_ID`.
 Generated image and speech URLs stay redacted unless the user explicitly needs them and
-`--show-sensitive` is added as a root option. Download speech output promptly; the API retains
-it for seven days. Deleting a finished task also removes its output.
+`--show-sensitive` is added as a root option. Speech output is managed in the organization's
+media library; automatic cleanup is off by default and follows organization retention or
+capacity settings when enabled. Download output promptly. Unused speech reference assets
+are retained for seven days by default; saved custom voices are kept separately.
+Deleting a finished task also removes its output.
 
 ## Diagnostics
 

@@ -3,7 +3,7 @@ name: compshare
 description: Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the controlled CompShare MCP bridge.
 description_zh: 通过受控 CompShare MCP 桥接查询和管理优云智算 GPU 云资源及 MiniMax H3 视频、图片和语音任务。
 description_en: Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the controlled CompShare MCP bridge.
-version: "0.5.6"
+version: "0.5.7"
 author: "CompShare"
 ---
 
@@ -175,9 +175,22 @@ MiniMax 使用 Token 表单中的独立 `COMPSHARE_MINIMAX_API_KEY`。缺失时�
 
 图片默认使用 1K；2K 以配置接口返回的价格是否存在为准，价格为 `null` 时不要提交。
 
+视频 4～30 秒均一次生成，包括带参考视频的任务。`--context-ir` 默认关闭，所有时长均
+强烈建议开启，每条任务另收 5 积分；使用 `--skill-id` 时必须同时开启。
+全能参考允许仅用音频，最多 9 张图片、3 段视频、3 段音频，合计最多 12 个；不能与首尾帧混用。
+图片宽高均为 256～5760 像素，宽高比为 0.4～2.5，单张最多 30 MiB。
+参考视频单段最多 50 MiB，参考音频单段最多 15 MiB；单段时长均为 2～15.08 秒，
+视频和音频分别累计，各自合计不超过 15.08 秒。参考视频合计时长向上取整到秒后收费，
+480P 为每秒 5 积分，其他分辨率为每秒 10 积分；图片和音频参考不另收输入费。
+
 视频素材支持公开 URL 或 Data URL；图片和语音参考素材通过 `image upload`、
 `audio upload` 登记后使用资产 ID。生成结果 URL 默认脱敏；不要为了显示它而绕过连接器
 的敏感输出限制。
+
+`audio upload --duration-ms` 用于语音参考素材，时长为 500～30000 毫秒，文件最多 15 MiB，
+与视频生成中的参考音频限制不同。语音生成结果由组织媒体库管理，自动清理默认关闭，
+开启后按组织的保留时长或容量设置清理。未使用的语音参考素材默认保留 7 天；
+保存的自定义音色单独保留。删除已完成任务会同时删除结果文件。
 
 ## 故障恢复
 

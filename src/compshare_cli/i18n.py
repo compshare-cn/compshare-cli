@@ -597,6 +597,9 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Wait for the operation to reach a stable state.": "等待操作进入稳定状态。",
     "Maximum wait time in seconds.": "最长等待时间（秒）。",
     "Validate and show the request without changing resources.": "仅校验并显示请求，不变更资源。",
+    "Skip the inventory precheck. Requires --count, --cpu, and --memory.": (
+        "跳过库存预查。需要指定 --count、--cpu 和 --memory。"
+    ),
     "Operation plan": "操作计划",
     "Create plan": "创建计划",
     "Instance details": "实例详情",
@@ -825,6 +828,9 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     ),
     "Option --profile requires a value.": "选项 --profile 需要一个值。",
     "Option --profile may only be specified once.": "选项 --profile 只能指定一次。",
+    "--skip-capacity-check requires --count, --cpu, and --memory.": (
+        "--skip-capacity-check 需要指定 --count、--cpu 和 --memory。"
+    ),
     (
         "No inventory is available for the selected GPU, CPU, memory, image, billing, "
         "and disk combination."

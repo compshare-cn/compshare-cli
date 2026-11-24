@@ -933,6 +933,17 @@ def test_create_json_requires_explicit_parameters(capsys) -> None:
     assert "--gpu" in payload["error"]["message"]
 
 
+def test_create_skip_capacity_check_requires_explicit_spec(capsys) -> None:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--json", "instance", "create", "--skip-capacity-check"])
+
+    assert raised.value.code == 2
+    error = _json_error(capsys.readouterr().out)
+    assert error["code"] == "invalid_usage"
+    for option in ("--skip-capacity-check", "--count", "--cpu", "--memory"):
+        assert option in error["message"]
+
+
 def test_local_instance_template_crud() -> None:
     created = runner.invoke(
         cli.app,
@@ -1070,7 +1081,8 @@ def test_instance_create_loads_template_and_explicit_options_override(
     ]
 
 
-def test_create_explicit_json_mode_skips_discovery(monkeypatch) -> None:
+@pytest.mark.parametrize("skip_capacity_check", [False, True])
+def test_create_explicit_json_mode_skips_discovery(monkeypatch, skip_capacity_check) -> None:
     calls = []
 
     def fake_call(state, action, params):
@@ -1112,6 +1124,7 @@ def test_create_explicit_json_mode_skips_discovery(monkeypatch) -> None:
             "--zone",
             "cn-wlcb-01",
             "--yes",
+            *(["--skip-capacity-check"] if skip_capacity_check else []),
         ],
         env={
             "COMPSHARE_PUBLIC_KEY": "public",
@@ -1120,12 +1133,16 @@ def test_create_explicit_json_mode_skips_discovery(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert [action for action, _ in calls] == [
-        "CheckCompShareResourceCapacity",
-        "GetCompShareInstancePrice",
-        "CreateCompShareInstance",
-    ]
-    assert _json_data(result.stdout)["selection"]["ChargeType"] == "Postpay"
+    expected_actions = ["GetCompShareInstancePrice", "CreateCompShareInstance"]
+    if not skip_capacity_check:
+        expected_actions.insert(0, "CheckCompShareResourceCapacity")
+    assert [action for action, _ in calls] == expected_actions
+    assert calls[-1][1]["GPU"] == 1
+    assert calls[-1][1]["CPU"] == 12
+    assert calls[-1][1]["Memory"] == 32 * 1024
+    payload = _json_data(result.stdout)
+    assert payload["selection"]["ChargeType"] == "Postpay"
+    assert (payload["capacity"] is None) is skip_capacity_check
     assert waits == [("uhost-test", {"region": "cn-wlcb", "desired": {"Running"}, "timeout": 600})]
 
 
@@ -3160,7 +3177,8 @@ def test_batch_lifecycle_reports_partial_failure(monkeypatch) -> None:
     assert payload["error"]["details"]["failed"][0]["instance"] == "host-2"
 
 
-def test_create_max_price_stops_before_create(monkeypatch, capsys) -> None:
+@pytest.mark.parametrize("skip_capacity_check", [False, True])
+def test_create_max_price_stops_before_create(monkeypatch, capsys, skip_capacity_check) -> None:
     calls = []
 
     def fake_call(state, action, params):
@@ -3195,11 +3213,15 @@ def test_create_max_price_stops_before_create(monkeypatch, capsys) -> None:
                 "--max-price",
                 "0.50",
                 "--yes",
+                *(["--skip-capacity-check"] if skip_capacity_check else []),
             ]
         )
 
     assert raised.value.code == 2
-    assert calls == ["CheckCompShareResourceCapacity", "GetCompShareInstancePrice"]
+    expected_actions = ["GetCompShareInstancePrice"]
+    if not skip_capacity_check:
+        expected_actions.insert(0, "CheckCompShareResourceCapacity")
+    assert calls == expected_actions
     assert "0.7" in _json_error(capsys.readouterr().out)["message"]
 
 

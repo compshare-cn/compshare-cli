@@ -3,7 +3,7 @@ name: compshare
 description: Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the controlled CompShare MCP bridge.
 description_zh: 通过受控 CompShare MCP 桥接查询和管理优云智算 GPU 云资源及 MiniMax H3 视频、图片和语音任务。
 description_en: Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the controlled CompShare MCP bridge.
-version: "0.5.7"
+version: "0.5.8"
 author: "CompShare"
 ---
 
@@ -118,6 +118,9 @@ CLI 本身要求确认的操作仍需在 `args` 中加入 `--yes`。若返回 `o
 `instance create --dry-run`，展示选中的规格、库存、价格和请求参数。用户确认后，使用完全
 相同的参数移除 `--dry-run`，加入 `--yes`，再调用写工具。不要在没有用户给定价格保护时
 自行猜测 `--max-price`。
+
+用户要求跳过库存预查时，在预演和创建命令中都加入 `--skip-capacity-check`，并指定
+`--count`、`--cpu` 和 `--memory`。询价和 `--max-price` 保护仍然生效。
 
 JSON 创建至少提供 GPU、每实例 GPU 数、CPU、内存、镜像、Region 和 Zone；不要触发交互
 向导。创建超时后先 `instance list/show`，按幂等标识或创建时间核对，不能立即再次购买。

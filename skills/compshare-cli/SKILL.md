@@ -130,6 +130,8 @@ compshare --json instance create \
 
 In JSON mode, creation cannot open the interactive wizard. Supply `--gpu`, `--count`, `--cpu`, `--memory`, `--image`, `--region` and `--zone`. Here `--count` is GPUs per instance; `--max-count` is the number of instances.
 
+When the user requests creation without an inventory precheck, add `--skip-capacity-check` to both the dry run and creation command. Supply `--count`, `--cpu`, and `--memory` through options or a template. The CLI still quotes the price and enforces `--max-price`.
+
 ## Inspect and manage instances
 
 ```bash

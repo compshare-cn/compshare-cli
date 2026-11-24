@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.8
+
+- 新增 `instance create --skip-capacity-check`，在已指定 GPU 数、CPU 和内存时跳过库存预查，保留询价和 `--max-price` 保护。
+
 ## 0.5.7
 
 - 对齐最新 H3 API，允许仅用参考音频创建视频，可省略文本提示词。

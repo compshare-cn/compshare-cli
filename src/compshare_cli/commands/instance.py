@@ -1350,6 +1350,11 @@ def create(
         "--cfs/--no-cfs",
         help="Attach existing CFS during container creation; does not purchase storage.",
     ),
+    skip_capacity_check: bool = typer.Option(
+        False,
+        "--skip-capacity-check",
+        help="Skip the inventory precheck. Requires --count, --cpu, and --memory.",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -1401,6 +1406,9 @@ def create(
     resolved_platform = str(platform if platform is not None else "Auto")
     resolved_max_count = int(max_count if max_count is not None else 1)
     resolved_us3 = bool(us3) if us3 is not None else False
+    if skip_capacity_check and any(value is None for value in (count, cpu, memory)):
+        raise UsageError(tr("--skip-capacity-check requires --count, --cpu, and --memory."))
+
     interactive = any(value is None for value in (gpu, count, cpu, memory, image, region, zone))
     if interactive and state.json_output:
         raise UsageError(
@@ -1437,9 +1445,11 @@ def create(
 
     disks = _disk_list(resolved_boot_disk, resolved_boot_type, data_disk)
     common = {"Region": region, "Zone": selected_zone}
-    capacity_params = dict(common)
-    capacity_params.update(
-        {
+    requested_memory = memory_mib(memory) // 1024 if memory is not None else None
+    selected_spec: Dict[str, Any] = {}
+    if not skip_capacity_check:
+        capacity_params = {
+            **common,
             "GpuType": resolved_gpu,
             "MachineType": "G",
             "MinimalCpuPlatform": resolved_platform,
@@ -1447,36 +1457,34 @@ def create(
             "ChargeType": resolved_charge,
             "Disks": disks,
         }
-    )
-    capacity = call(state, "CheckCompShareResourceCapacity", capacity_params)
-    requested_memory = memory_mib(memory) // 1024 if memory is not None else None
-    matching = [
-        spec
-        for spec in capacity.get("Specs") or []
-        if spec.get("ResourceEnough")
-        and (count is None or spec.get("Gpu") == count)
-        and (cpu is None or spec.get("Cpu") == cpu)
-        and (requested_memory is None or spec.get("Mem") == requested_memory)
-    ]
-    if not matching:
-        Renderer(state.json_output, state.show_sensitive).error(
-            tr(
-                "No inventory is available for the selected GPU, CPU, memory, image, billing, "
-                "and disk combination."
-            ),
-            details={"capacity": capacity},
-        )
-        raise typer.Exit(2)
+        capacity = call(state, "CheckCompShareResourceCapacity", capacity_params)
+        matching = [
+            spec
+            for spec in capacity.get("Specs") or []
+            if spec.get("ResourceEnough")
+            and (count is None or spec.get("Gpu") == count)
+            and (cpu is None or spec.get("Cpu") == cpu)
+            and (requested_memory is None or spec.get("Mem") == requested_memory)
+        ]
+        if not matching:
+            Renderer(state.json_output, state.show_sensitive).error(
+                tr(
+                    "No inventory is available for the selected GPU, CPU, memory, image, billing, "
+                    "and disk combination."
+                ),
+                details={"capacity": capacity},
+            )
+            raise typer.Exit(2)
 
-    selected_spec = matching[0]
-    if interactive and any(value is None for value in (count, cpu, memory)):
-        selected_spec = _choose(
-            "Available specification",
-            matching,
-            lambda spec: (
-                f"GPU ×{spec.get('Gpu')} · {spec.get('Cpu')} CPU · {spec.get('Mem')}GiB memory"
-            ),
-        )
+        selected_spec = matching[0]
+        if interactive and any(value is None for value in (count, cpu, memory)):
+            selected_spec = _choose(
+                "Available specification",
+                matching,
+                lambda spec: (
+                    f"GPU ×{spec.get('Gpu')} · {spec.get('Cpu')} CPU · {spec.get('Mem')}GiB memory"
+                ),
+            )
     resolved_count = int(count if count is not None else selected_spec["Gpu"])
     resolved_cpu = int(cpu if cpu is not None else selected_spec["Cpu"])
     resolved_memory_gib = int(
@@ -1552,7 +1560,7 @@ def create(
         "dry_run": dry_run,
         "max_price": str(price_limit) if price_limit is not None else None,
         "selection": selection,
-        "capacity": selected_spec,
+        "capacity": selected_spec or None,
         "price": price,
         "request": create_params,
     }
@@ -1593,7 +1601,7 @@ def create(
     created = call(state, "CreateCompShareInstance", create_params)
     result = {
         "selection": selection,
-        "capacity": selected_spec,
+        "capacity": selected_spec or None,
         "price": price,
         "instance": created,
     }

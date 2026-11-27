@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "compshare-cli",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "description": "Manage CompShare GPU cloud resources and MiniMax H3 media tasks through the compshare CLI.",
   "author": {
     "name": "CompShare"
@@ -25,7 +25,7 @@
         ]
       },
       "publication": {
-        "release_notes": "Adds an option to skip the instance inventory precheck while retaining the price quote and maximum price guard."
+        "release_notes": "Adds CPod command execution, MiniMax-H3-Image and IndexTTS2 support, and 10,000-character H3 video prompts. Fixes image creation progress and adds community favorites and project-scoped CFS attachment."
       }
     }
   }

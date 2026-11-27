@@ -36,7 +36,7 @@ class CompShareSDK:
         self._service = Client(config, logger=logger).ucompshare()
 
     def invoke(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        if action == "GetCompShareInstanceMonitor":
+        if action in {"GetCompShareInstanceMonitor", "RunCompShareInstanceCommand"}:
             return self._json_response(action, self._send_request(action, params))
         return self._service.invoke(action, dict(params))
 
@@ -53,6 +53,8 @@ class CompShareSDK:
         for handler in self._service.middleware.request_handlers:
             args = handler(args)
         monitoring = action == "GetCompShareInstanceMonitor"
+        executing = action == "RunCompShareInstanceCommand"
+        sync_execution = executing and args.get("Type") != "async"
         instance_ids = args.get("UHostIds")
         if monitoring and instance_ids is not None:
             if not isinstance(instance_ids, list) or any(
@@ -77,8 +79,8 @@ class CompShareSDK:
                     self._service.config.ssl_cert,
                     self._service.config.ssl_key,
                 ),
-                timeout=self._service.config.timeout,
-                max_retries=self._service.config.max_retries,
+                timeout=1900 if sync_execution else self._service.config.timeout,
+                max_retries=0 if executing else self._service.config.max_retries,
             )
         except Exception as error:
             for handler in self._service.middleware.exception_handlers:
@@ -94,7 +96,9 @@ class CompShareSDK:
             raise
         for handler in self._service.middleware.response_handlers:
             data = handler(data, response)
-        if int(data.get("RetCode", -1)) != 0:
+        code = int(data.get("RetCode", -1))
+        # Execution failures can carry partial output that RetCodeException would discard.
+        if code != 0 and not (action == "RunCompShareInstanceCommand" and code == 226656):
             error = ucloud_exc.RetCodeException(
                 action=action,
                 code=int(data.get("RetCode", 0)),

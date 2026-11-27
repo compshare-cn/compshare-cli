@@ -246,13 +246,14 @@ def delete_disk(
 @us3_app.command("attach", help="Attach US3 object storage to an instance.")
 def attach_us3(
     ctx: typer.Context,
-    instance: str = typer.Option(..., "--instance", help="Target running instance ID."),
+    instance: str = typer.Option(..., "--instance", help="Target instance ID."),
+    project: Optional[str] = typer.Option(None, help="Project ID."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the request only."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     state = runtime(ctx)
-    region, zone, _ = locate_instance(state, instance)
-    params = request(ctx, zone=True, region_value=region, zone_value=zone)
+    region, zone, _ = locate_instance(state, instance, project_id=project)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone, project_id=project)
     params["UHostId"] = instance
     container = instance.startswith("cpod-")
     notice = (
@@ -504,26 +505,28 @@ def delete_cfs(
 def attach_cfs(
     ctx: typer.Context,
     instance: str = typer.Option(..., "--instance", help="Target instance ID."),
+    project: Optional[str] = typer.Option(None, help="Project ID."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the request only."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     if not instance.startswith("cpod-"):
         raise UsageError(tr("CFS attachments require a cpod- instance ID."))
-    attach_us3(ctx, instance, dry_run, yes)
+    attach_us3(ctx, instance, project, dry_run, yes)
 
 
 @cfs_app.command("detach", help="Detach CFS; running instances will restart.")
 def detach_cfs(
     ctx: typer.Context,
     instance: str = typer.Option(..., "--instance", help="Attached instance ID."),
+    project: Optional[str] = typer.Option(None, help="Project ID."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the request only."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     if not instance.startswith("cpod-"):
         raise UsageError(tr("CFS attachments require a cpod- instance ID."))
     state = runtime(ctx)
-    region, zone, _ = locate_instance(state, instance)
-    params = request(ctx, zone=True, region_value=region, zone_value=zone)
+    region, zone, _ = locate_instance(state, instance, project_id=project)
+    params = request(ctx, zone=True, region_value=region, zone_value=zone, project_id=project)
     params["UHostId"] = instance
     notice = tr(
         "Detach CFS from {instance}? Running instances will restart; save your work first.",

@@ -180,8 +180,8 @@ def _content(
     reference_audio: Sequence[str],
 ) -> List[Dict[str, Any]]:
     text = prompt.strip()
-    if len(text) > 7000:
-        raise UsageError(tr("Prompt cannot exceed 7000 characters."))
+    if len(text) > 10000:
+        raise UsageError(tr("Prompt cannot exceed 10000 characters."))
     if (first_frame or last_frame) and (reference_images or reference_videos or reference_audio):
         raise UsageError(tr("Frame inputs cannot be combined with reference inputs."))
     if not text and not (
@@ -241,7 +241,7 @@ def _task_path(task_id: str, *, query: bool) -> str:
 @app.command("create", help="Create a MiniMax H3 video task.")
 def create(
     ctx: typer.Context,
-    prompt: str = typer.Argument("", help="Video prompt; at most 7000 characters."),
+    prompt: str = typer.Argument("", help="Video prompt; at most 10000 characters."),
     model: str = typer.Option("MiniMax-H3", help="Model: MiniMax-H3 or minimax-h3-lite."),
     resolution: str = typer.Option("768P", help="Output resolution: 480P, 768P, 1080P, 2K, or 4K."),
     duration: int = typer.Option(5, min=4, max=30, help="Video duration in seconds (4-30)."),
@@ -584,7 +584,11 @@ image_app = typer.Typer(help="Generate images and manage image tasks.", no_args_
 app.add_typer(image_app, name="image")
 
 _IMAGE_PATH = "/image/v1/tasks"
+_H3_IMAGE_MODEL = "MiniMax-H3-Image"
+_IMAGE_MODELS = {"Qwen-Image-2.1", _H3_IMAGE_MODEL}
 _IMAGE_RATIOS = {"1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"}
+_H3_IMAGE_RATIOS = _IMAGE_RATIOS | {"21:9", "5:4", "4:5"}
+_IMAGE_MODEL_HELP = "Image model: Qwen-Image-2.1 (default) or MiniMax-H3-Image."
 _IMAGE_MIME = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -600,18 +604,24 @@ _IMAGE_COLUMNS = (
 
 
 @image_app.command("config", help="Show image generation availability and prices.")
-def image_config(ctx: typer.Context) -> None:
+def image_config(
+    ctx: typer.Context,
+    model: Optional[str] = typer.Option(None, help=_IMAGE_MODEL_HELP),
+) -> None:
+    if model is not None and model not in _IMAGE_MODELS:
+        raise UsageError(tr("Unsupported image model: {model}.", model=model))
     state = runtime(ctx)
     Renderer(state.json_output, state.show_sensitive).data(
-        _request(state, "GET", "/image/v1/config")
+        _request(state, "GET", "/image/v1/config", query={"model": model} if model else None)
     )
 
 
-@image_app.command("create", help="Create a Qwen-Image task.")
+@image_app.command("create", help="Create an image generation task.")
 def image_create(
     ctx: typer.Context,
     prompt: str = typer.Argument(..., help="Image prompt; at most 7000 characters."),
-    resolution: str = typer.Option("1K", help="Image resolution: 1K or 2K."),
+    model: Optional[str] = typer.Option(None, help=_IMAGE_MODEL_HELP),
+    resolution: str = typer.Option("1K", help="Image resolution: 1K, 2K, or H3-only 4K."),
     ratio: str = typer.Option("1:1", help="Image aspect ratio."),
     reference_assets: Optional[List[str]] = typer.Option(
         None, "--reference-asset", help="Registered reference image asset ID; repeatable."
@@ -624,9 +634,12 @@ def image_create(
     text = prompt.strip()
     if not text or len(prompt) > 7000:
         raise UsageError(tr("Image prompt must contain 1-7000 characters."))
-    if resolution not in {"1K", "2K"}:
-        raise UsageError(tr("Image resolution must be 1K or 2K."))
-    if ratio not in _IMAGE_RATIOS:
+    if model is not None and model not in _IMAGE_MODELS:
+        raise UsageError(tr("Unsupported image model: {model}.", model=model))
+    is_h3 = model == _H3_IMAGE_MODEL
+    if resolution not in {"1K", "2K"} and not (is_h3 and resolution == "4K"):
+        raise UsageError(tr("Image resolution must be 1K, 2K, or H3-only 4K."))
+    if ratio not in (_H3_IMAGE_RATIOS if is_h3 else _IMAGE_RATIOS):
         raise UsageError(tr("Unsupported image ratio: {ratio}.", ratio=ratio))
     if len(reference_assets or []) > 10:
         raise UsageError(tr("At most 10 reference images are allowed."))
@@ -636,6 +649,8 @@ def image_create(
         "aspect_ratio": ratio,
         "optimize_prompt": optimize_prompt,
     }
+    if model:
+        payload["model"] = model
     if reference_assets:
         payload["reference_images"] = [{"asset_id": value} for value in reference_assets]
     state = runtime(ctx)
@@ -646,7 +661,12 @@ def image_create(
         _new_key(idempotency_key),
         dry_run,
         yes,
-        [("RESOLUTION", resolution), ("RATIO", ratio), ("REFERENCES", len(reference_assets or []))],
+        [
+            ("MODEL", model or "Qwen-Image-2.1"),
+            ("RESOLUTION", resolution),
+            ("RATIO", ratio),
+            ("REFERENCES", len(reference_assets or [])),
+        ],
     )
 
 
@@ -655,11 +675,13 @@ def image_show(ctx: typer.Context, task_id: str = typer.Argument(...)) -> None:
     state = runtime(ctx)
     response = _request(state, "GET", _media_task_path(_IMAGE_PATH, task_id))
     task = response.get("task") if isinstance(response.get("task"), dict) else {}
+    task_input = task.get("input") if isinstance(task.get("input"), dict) else {}
     Renderer(state.json_output, state.show_sensitive).details(
         "Image task",
         [
             ("TASK ID", task.get("task_id", task_id)),
             ("STATUS", task.get("status")),
+            ("MODEL", task_input.get("model")),
             ("POINTS", task.get("point_cost")),
             ("OUTPUT URL", task.get("output_url")),
             ("ERROR", task.get("error_message")),
@@ -733,6 +755,7 @@ audio_app = typer.Typer(help="Generate speech and manage audio tasks.", no_args_
 app.add_typer(audio_app, name="audio")
 
 _AUDIO_PATH = "/audio/v1/speech/jobs"
+_AUDIO_MODELS = {"indextts2.5", "indextts2"}
 _AUDIO_LANGUAGES = {"ZH", "EN", "JA", "ES", "AR"}
 _AUDIO_MIME = {
     ".wav": "audio/wav",
@@ -792,7 +815,7 @@ def _emotion_values(raw: str, mode: Optional[str]) -> List[float]:
     return values
 
 
-def _pronunciation_rules(raw: Sequence[str]) -> List[Dict[str, str]]:
+def _pronunciation_rules(raw: Sequence[str], model: Optional[str]) -> List[Dict[str, str]]:
     if len(raw) > 100:
         raise UsageError(tr("At most 100 pronunciation rules are allowed."))
     rules: List[Dict[str, str]] = []
@@ -804,6 +827,8 @@ def _pronunciation_rules(raw: Sequence[str]) -> List[Dict[str, str]]:
         word, kind, value = (part.strip() for part in parts)
         if not 1 <= len(word) <= 64 or kind not in {"pinyin", "alias", "cmu", "kana"}:
             raise UsageError(tr("Invalid pronunciation word or kind."))
+        if model == "indextts2" and kind not in {"pinyin", "alias"}:
+            raise UsageError(tr("IndexTTS2 supports only pinyin and alias pronunciation rules."))
         if not 1 <= len(value) <= 512 or word in seen:
             raise UsageError(tr("Invalid or duplicate pronunciation rule."))
         seen.add(word)
@@ -811,14 +836,17 @@ def _pronunciation_rules(raw: Sequence[str]) -> List[Dict[str, str]]:
     return rules
 
 
-@audio_app.command("create", help="Create an IndexTTS 2.5 speech task.")
+@audio_app.command("create", help="Create a speech generation task.")
 def audio_create(
     ctx: typer.Context,
     text: str = typer.Argument(..., help="Speech text; at most 2000 characters."),
+    model: Optional[str] = typer.Option(
+        None, help="Speech model: indextts2.5 (default) or indextts2."
+    ),
     voice_source: str = typer.Option("preset", help="preset, custom, or asset."),
     voice_id: Optional[str] = typer.Option(None, help="Preset or custom voice ID."),
     asset_id: Optional[str] = typer.Option(None, help="Registered reference audio asset ID."),
-    language: str = typer.Option("ZH", help="ZH, EN, JA, ES, or AR."),
+    language: str = typer.Option("ZH", help="ZH or EN; IndexTTS 2.5 also supports JA, ES, AR."),
     speed: float = typer.Option(1.0, min=0, max=2.0, help="Speech speed (0 or 0.5-2.0)."),
     auto_emotion: bool = typer.Option(True, "--auto-emotion/--no-auto-emotion"),
     emotion_description: Optional[str] = typer.Option(None, help="Emotion description."),
@@ -838,8 +866,12 @@ def audio_create(
 ) -> None:
     if len(text) > 2000 or not any(char.isalpha() or char.isdecimal() for char in text):
         raise UsageError(tr("Speech text must contain 1-2000 characters of letters or digits."))
+    if model is not None and model not in _AUDIO_MODELS:
+        raise UsageError(tr("Unsupported speech model: {model}.", model=model))
     if language not in _AUDIO_LANGUAGES:
         raise UsageError(tr("Unsupported speech language: {language}.", language=language))
+    if model == "indextts2" and language not in {"ZH", "EN"}:
+        raise UsageError(tr("IndexTTS2 supports only ZH and EN."))
     if not math.isfinite(speed) or (speed != 0 and not 0.5 <= speed <= 2.0):
         raise UsageError(tr("Speech speed must be 0 or between 0.5 and 2.0."))
     if not math.isfinite(emotion_strength) or not 0 <= emotion_strength <= 1:
@@ -876,6 +908,8 @@ def audio_create(
         "auto_emotion": auto_emotion,
         "emotion_strength": emotion_strength,
     }
+    if model:
+        payload["model"] = model
     if emotion_description:
         payload["emotion_description"] = emotion_description
     if emotion_vector:
@@ -883,7 +917,7 @@ def audio_create(
         if emotion_vector_mode:
             payload["emotion_vector_mode"] = emotion_vector_mode
     if pronunciations:
-        payload["pronunciations"] = _pronunciation_rules(pronunciations)
+        payload["pronunciations"] = _pronunciation_rules(pronunciations, model)
     if save_voice:
         payload["save_voice"] = True
         payload["voice_name"] = voice_name.strip() if voice_name else ""
@@ -895,7 +929,12 @@ def audio_create(
         _new_key(idempotency_key),
         dry_run,
         yes,
-        [("LANGUAGE", language), ("VOICE SOURCE", voice_source), ("TEXT LENGTH", len(text))],
+        [
+            ("MODEL", model or "indextts2.5"),
+            ("LANGUAGE", language),
+            ("VOICE SOURCE", voice_source),
+            ("TEXT LENGTH", len(text)),
+        ],
     )
 
 
@@ -909,6 +948,7 @@ def audio_show(ctx: typer.Context, task_id: str = typer.Argument(...)) -> None:
         [
             ("TASK ID", task.get("task_id", task_id)),
             ("STATUS", task.get("status")),
+            ("MODEL", task.get("model")),
             ("POINTS", task.get("point_cost")),
             ("OUTPUT URL", task.get("output_url")),
             ("ERROR", task.get("error_message")),

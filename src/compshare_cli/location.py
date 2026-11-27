@@ -37,11 +37,14 @@ def locate_instance(
     instance: str,
     *,
     request_region: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> Tuple[str, str, Dict[str, Any]]:
     """Find an instance and return the Region and Zone reported by the API."""
     params: Dict[str, Any] = {"UHostIds": [instance], "Limit": 1, "Offset": 0}
     if request_region is not None:
         params["Region"] = request_region
+    if project_id:
+        params["ProjectId"] = project_id
     response = call(state, "DescribeCompShareInstance", params)
     hosts = response.get("UHostSet") or []
     host = next(

@@ -6,6 +6,7 @@ from ucloud.core import exc as ucloud_exc
 
 from compshare_cli import api, cli
 from compshare_cli.commands import storage
+from compshare_cli.location import locate_instance
 
 runner = CliRunner()
 LOCATION = ["--region", "cn-bj2", "--zone", "cn-bj2-03"]
@@ -81,7 +82,9 @@ def gateway(monkeypatch):
     monkeypatch.setenv("COMPSHARE_PUBLIC_KEY", "test-public")
     monkeypatch.setenv("COMPSHARE_PRIVATE_KEY", "test-private")
     monkeypatch.setattr(api, "CompShareSDK", FakeSDK)
-    monkeypatch.setattr(storage, "locate_instance", lambda *_args: ("cn-bj2", "cn-bj2-03", {}))
+    monkeypatch.setattr(
+        storage, "locate_instance", lambda *_args, **_kwargs: ("cn-bj2", "cn-bj2-03", {})
+    )
     return calls, responses
 
 
@@ -270,6 +273,47 @@ def test_cfs_mount_commands_reject_regular_instances(gateway, command):
     )
     assert result.exit_code != 0
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "group,command,action",
+    [
+        ("us3", "attach", "AttachUS3"),
+        ("cfs", "attach", "AttachUS3"),
+        ("cfs", "detach", "DetachCFS"),
+    ],
+)
+def test_cfs_mount_uses_project_for_lookup_and_mutation(
+    gateway, monkeypatch, group, command, action
+):
+    calls, responses = gateway
+    monkeypatch.setattr(storage, "locate_instance", locate_instance)
+    responses["DescribeCompShareInstance"] = {
+        "UHostSet": [{"UHostId": "cpod-1", "Region": "cn-bj2", "Zone": "cn-bj2-03"}]
+    }
+    result = runner.invoke(
+        cli.app,
+        [
+            "--json",
+            "storage",
+            group,
+            command,
+            "--instance",
+            "cpod-1",
+            "--project",
+            "org-test",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        (
+            "DescribeCompShareInstance",
+            {"UHostIds": ["cpod-1"], "Limit": 1, "Offset": 0, "ProjectId": "org-test"},
+        ),
+        (action, {**BASE, "UHostId": "cpod-1"}),
+    ]
 
 
 def test_regular_us3_attachment_keeps_existing_behavior(gateway):

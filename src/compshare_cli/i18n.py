@@ -77,7 +77,7 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "List MiniMax H3 point packages.": "列出 MiniMax H3 积分套餐包。",
     "Show the MiniMax H3 point balance.": "查看 MiniMax H3 积分余额。",
     "Cancel an unfinished MiniMax H3 video task.": "取消尚未结束的 MiniMax H3 视频任务。",
-    "Video prompt; at most 7000 characters.": "视频提示词，最多 7000 个字符。",
+    "Video prompt; at most 10000 characters.": "视频提示词，最多 10000 个字符。",
     "Model: MiniMax-H3 or minimax-h3-lite.": "模型：MiniMax-H3 或 minimax-h3-lite。",
     "Output resolution: 480P, 768P, 1080P, 2K, or 4K.": (
         "输出分辨率：480P、768P、1080P、2K 或 4K。"
@@ -114,7 +114,7 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "MiniMax H3 API returned an invalid response.": "MiniMax H3 API 返回了无效响应。",
     "MiniMax H3 API rejected the request.": "MiniMax H3 API 拒绝了请求。",
     "Prompt cannot be empty.": "提示词不能为空。",
-    "Prompt cannot exceed 7000 characters.": "提示词不能超过 7000 个字符。",
+    "Prompt cannot exceed 10000 characters.": "提示词不能超过 10000 个字符。",
     "Frame inputs cannot be combined with reference inputs.": (
         "首尾帧素材不能与参考图片、视频或音频混用。"
     ),
@@ -141,14 +141,17 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "FILE": "文件",
     "Generate images and manage image tasks.": "生成图片并管理图片任务。",
     "Show image generation availability and prices.": "查看图片生成服务状态和价格。",
-    "Create a Qwen-Image task.": "创建 Qwen-Image 任务。",
+    "Create an image generation task.": "创建图片生成任务。",
     "Show an image task.": "查看图片任务。",
     "List image tasks.": "列出图片任务。",
     "Cancel a queued image task.": "取消排队中的图片任务。",
     "Delete a finished image task and its output.": "删除已完成的图片任务及成品。",
     "Upload and register a reference image.": "上传并登记参考图片。",
     "Image prompt; at most 7000 characters.": "图片提示词，最多 7000 个字符。",
-    "Image resolution: 1K or 2K.": "图片分辨率：1K 或 2K。",
+    "Image model: Qwen-Image-2.1 (default) or MiniMax-H3-Image.": (
+        "图片模型：Qwen-Image-2.1（默认）或 MiniMax-H3-Image。"
+    ),
+    "Image resolution: 1K, 2K, or H3-only 4K.": "图片分辨率：1K、2K，或 H3 专用的 4K。",
     "Image aspect ratio.": "图片宽高比。",
     "Registered reference image asset ID; repeatable.": "已登记的参考图片素材 ID，可重复指定。",
     "Optimize the prompt.": "优化提示词。",
@@ -161,7 +164,7 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Generate speech and manage audio tasks.": "生成语音并管理音频任务。",
     "Show speech pricing and point balance.": "查看语音价格和积分余额。",
     "List preset or custom voices.": "列出预设或自定义音色。",
-    "Create an IndexTTS 2.5 speech task.": "创建 IndexTTS 2.5 语音任务。",
+    "Create a speech generation task.": "创建语音生成任务。",
     "Show a speech task.": "查看语音任务。",
     "List speech tasks.": "列出语音任务。",
     "Cancel a queued speech task.": "取消排队中的语音任务。",
@@ -174,7 +177,12 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "preset, custom, or asset.": "preset、custom 或 asset。",
     "Preset or custom voice ID.": "预设或自定义音色 ID。",
     "Registered reference audio asset ID.": "已登记的参考音频素材 ID。",
-    "ZH, EN, JA, ES, or AR.": "ZH、EN、JA、ES 或 AR。",
+    "Speech model: indextts2.5 (default) or indextts2.": (
+        "语音模型：indextts2.5（默认）或 indextts2。"
+    ),
+    "ZH or EN; IndexTTS 2.5 also supports JA, ES, AR.": (
+        "ZH 或 EN，IndexTTS 2.5 还支持 JA、ES 和 AR。"
+    ),
     "Speech speed (0 or 0.5-2.0).": "语速（0 或 0.5–2.0）。",
     "Emotion description.": "情绪描述。",
     "Emotion strength (0-1).": "情绪强度（0–1）。",
@@ -199,7 +207,8 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Reference upload failed with HTTP {status}.": "参考素材上传失败，HTTP 状态码为 {status}。",
     "Unable to upload the reference file.": "无法上传参考素材文件。",
     "Image prompt must contain 1-7000 characters.": "图片提示词须包含 1–7000 个字符。",
-    "Image resolution must be 1K or 2K.": "图片分辨率须为 1K 或 2K。",
+    "Image resolution must be 1K, 2K, or H3-only 4K.": "图片分辨率须为 1K、2K，或 H3 专用的 4K。",
+    "Unsupported image model: {model}.": "不支持的图片模型：{model}。",
     "Unsupported image ratio: {ratio}.": "不支持的图片宽高比：{ratio}。",
     "At most 10 reference images are allowed.": "参考图片最多 10 张。",
     "Sort must be latest or oldest.": "排序方式须为 latest 或 oldest。",
@@ -218,11 +227,16 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "At most 100 pronunciation rules are allowed.": "读音规则最多 100 条。",
     "Pronunciation must be WORD:KIND:VALUE.": "读音规则格式须为 WORD:KIND:VALUE。",
     "Invalid pronunciation word or kind.": "读音规则的词语或类型无效。",
+    "IndexTTS2 supports only pinyin and alias pronunciation rules.": (
+        "IndexTTS2 仅支持 pinyin 和 alias 读音规则。"
+    ),
     "Invalid or duplicate pronunciation rule.": "读音规则无效或重复。",
     "Speech text must contain 1-2000 characters of letters or digits.": (
         "语音正文须包含字母或数字，且不超过 2000 个字符。"
     ),
     "Unsupported speech language: {language}.": "不支持的语音语言：{language}。",
+    "Unsupported speech model: {model}.": "不支持的语音模型：{model}。",
+    "IndexTTS2 supports only ZH and EN.": "IndexTTS2 仅支持 ZH 和 EN。",
     "Speech speed must be 0 or between 0.5 and 2.0.": "语速须为 0 或介于 0.5 和 2.0 之间。",
     "Emotion strength must be between 0 and 1.": "情绪强度须介于 0 和 1 之间。",
     "Voice source must be preset, custom, or asset.": "音色来源须为 preset、custom 或 asset。",
@@ -252,6 +266,24 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Skill name and content cannot be empty.": "Skill 名称和内容不能为空。",
     "Skill request cannot exceed 64 KiB.": "Skill 请求体不能超过 64 KiB。",
     "Manage durable remote instance jobs.": "管理可断线恢复的实例远程任务。",
+    "Run Bash in a CPod instance through the cloud API.": "通过云 API 在 CPod 实例中执行 Bash。",
+    "Get the result of an asynchronous CPod command.": "查询 CPod 异步命令的执行结果。",
+    "CPod instance ID.": "CPod 实例 ID。",
+    "Bash command as a single argument.": "将 Bash 命令作为单个参数传入。",
+    "Read a UTF-8 Bash script from a file.": "从文件读取 UTF-8 Bash 脚本。",
+    "Wait for output instead of returning a task ID.": "等待并返回执行输出，默认返回任务 ID。",
+    "Task ID returned by instance exec.": "instance exec 返回的任务 ID。",
+    "A CPod instance ID must start with cpod-.": "CPod 实例 ID 必须以 cpod- 开头。",
+    "Provide either a Bash command or --file.": "请指定 Bash 命令或 --file，两者只能选其一。",
+    "Command must be non-empty, NUL-free, and at most 256 KiB.": (
+        "命令不能为空或包含 NUL 字符，且最多为 256 KiB。"
+    ),
+    "Cannot read the Bash command as UTF-8.": "无法以 UTF-8 读取 Bash 命令。",
+    "Task ID must not be empty.": "任务 ID 不能为空。",
+    "CPod command execution failed.": "CPod 命令执行失败。",
+    "The API did not return a result for the finished CPod command.": (
+        "API 未返回已结束的 CPod 命令的执行结果。"
+    ),
     "Submit a durable remote job and return immediately.": "提交持久化远程任务并立即返回。",
     "List durable remote jobs on an instance.": "列出实例上的持久化远程任务。",
     "Show durable remote job status and metadata.": "显示远程任务状态和元数据。",
@@ -409,6 +441,7 @@ ZH_TRANSLATIONS: Dict[str, str] = {
         "列出平台、自制、社区、共享或已发布镜像。"
     ),
     "Fuzzy name or author search.": "按名称或作者模糊搜索。",
+    "Show only favorited community images.": "只显示已收藏的社区镜像。",
     "Community sort field.": "社区镜像排序字段。",
     "Organization ID for source=user.": "source=user 时使用的组织 ID。",
     "Create a custom image from an instance.": "从实例创建自制镜像。",
@@ -751,7 +784,6 @@ ZH_TRANSLATIONS: Dict[str, str] = {
     "Filter by GPU type.": "按 GPU 型号筛选。",
     "Filter by billing type.": "按计费方式筛选。",
     "Filter by region.": "按地域筛选。",
-    "Filter by region; must be used with --zone.": "按地域筛选，必须与 --zone 同时使用。",
     "Filter by availability zone; must be used with --region.": (
         "按可用区筛选，必须与 --region 同时使用。"
     ),

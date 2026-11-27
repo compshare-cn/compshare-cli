@@ -189,6 +189,19 @@ compshare --json instance cp INSTANCE_ID :/workspace/results ./results
 
 The CLI automatically resolves and caches SSH connection data. Use `--refresh` after a password reset or reinstall, and `--no-cache` when cached connection data must not be used.
 
+## Run a command in a CPod container through the cloud API
+
+Run Bash on a running `cpod-` instance using the CompShare API credentials already configured in the CLI.
+
+```bash
+compshare --json instance exec cpod-EXAMPLE 'nvidia-smi'
+compshare --json instance exec-result TASK_ID
+compshare --json instance exec cpod-EXAMPLE --sync 'nvidia-smi'
+compshare --json instance exec cpod-EXAMPLE --file ./check.sh
+```
+
+Submission returns `data.TaskId` by default. Save it and query the same task every 3–5 seconds while `data.Status` is `Running`. `Finished` includes the result. A command failure returns a nonzero CLI exit, with any partial output in `error.details.output`. A submission timeout may occur after the command starts, so check the instance before retrying. CPod commands have a 30-minute service budget and 1 MiB of combined output. Use `instance job` for workloads beyond those limits.
+
 ## Durable remote jobs
 
 Use `instance job` for installation, training, compilation and other work that must survive a local terminal or network disconnect:
@@ -286,6 +299,8 @@ team list/joined/show/create/update/delete/audit
 team invite/member/quota/billing
 ```
 
+Use `image list --source community --favorite` to list the current account's favorited community images.
+
 Treat image deletion, disk deletion, disk detach/resize, quota changes and team mutations as state-changing operations. Read the current resource and request confirmation before adding `--yes` where supported.
 
 ### CFS file storage
@@ -307,7 +322,7 @@ compshare --json storage cfs attach --instance CPOD_ID --dry-run
 ```
 
 Review the quote or operation plan before replacing `--dry-run` with `--yes`. Prices are in
-CNY. Resource queries and purchases accept `--project ID` when a non-default project is needed.
+CNY. Use `--project ID` for CFS queries, purchases, attachments and detachments in a non-default project.
 Attaching CFS may automatically purchase 50 GiB for one month if none exists in the zone.
 Attaching or detaching CFS on a running instance can restart it; save work before confirming.
 The existing `storage us3 attach` command has the same behavior for `cpod-` instances.
@@ -346,8 +361,9 @@ Audio references can be used alone, with or without a text prompt. Frame inputs 
 combined with reference inputs. Reference inputs allow up to 9 images, 3 videos and 3 audio
 clips, with at most 12 in total.
 
-Video supports 480P, 768P, 1080P, 2K and 4K and durations from 4 to 30 seconds, generated in
-one pass even with video references. `--context-ir` is optional for every duration and off by
+Video prompts can contain up to 10,000 characters. Video supports 480P, 768P, 1080P, 2K and 4K
+with durations from 4 to 30 seconds. The API generates 1080P natively at 4–15 seconds and
+upscales from 768P at 16–30 seconds. `--context-ir` is optional for every duration and off by
 default; it is strongly recommended and adds 5 points per task. Use `minimax skill list` to
 find a Skill, then pass both `--context-ir` and `--skill-id`.
 
@@ -369,10 +385,11 @@ Cancellation reads the current task before submitting the request:
 compshare --json minimax cancel TASK_ID --yes
 ```
 
-For images, inspect current pricing before creating a task. Each request creates one image:
-
-The default resolution is 1K. 2K requests are accepted only when that tier is enabled in
-`minimax image config`; a `null` price means the tier is unavailable.
+For images, inspect current pricing before creating a task. Each request creates one image.
+Qwen-Image-2.1 is the default model, with 1K and 2K tiers. Pass `--model MiniMax-H3-Image` to
+both `minimax image config` and `minimax image create` to use H3, which also supports 4K and
+the ratios 21:9, 5:4 and 4:5. The default resolution is 1K. A `null` tier price in the
+selected model's configuration means that tier is unavailable.
 
 ```bash
 compshare --json minimax image config
@@ -399,6 +416,10 @@ compshare --json minimax audio create 'Hello from CompShare.' --voice-id VOICE_I
   --idempotency-key SPEECH_REQUEST_ID --yes
 compshare --json minimax audio show TASK_ID
 ```
+
+Speech defaults to IndexTTS 2.5. Pass `--model indextts2` to `minimax audio create` to use
+IndexTTS2, which supports `ZH` and `EN` and the `pinyin` and `alias` pronunciation rules.
+Both models use the same voice and asset IDs. Use a new idempotency key when switching models.
 
 For an authorized reference recording, `minimax audio upload FILE --duration-ms MS --yes`
 accepts 500-30000 milliseconds and at most 15 MiB, and returns an asset ID. These speech

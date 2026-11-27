@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.9
+
+- 新增 `instance exec` 和 `instance exec-result`，支持通过 OpenAPI 在 CPod 实例内提交 Bash 命令并查询结果；`instance list` 支持只按地域筛选。
+- MiniMax H3 视频提示词上限提高到 10,000 字符，CLI 和 WorkBuddy 使用同一上限。同步说明原生 1080P 的时长范围。
+- `minimax image config/create --model MiniMax-H3-Image` 支持 H3 生图询价、4K 和新增宽高比。`minimax audio create --model indextts2` 支持 IndexTTS2 和相应的语言、读音规则限制。
+- 修复 `image create --wait` 漏读 `Process` 进度字段的问题，并增加 `image list --source community --favorite` 收藏筛选。
+- `storage cfs attach/detach` 和 CPod 的 `storage us3 attach` 支持 `--project`，实例查找和操作使用同一个项目 ID。
+
 ## 0.5.8
 
 - 新增 `instance create --skip-capacity-check`，在已指定 GPU 数、CPU 和内存时跳过库存预查，保留询价和 `--max-price` 保护。

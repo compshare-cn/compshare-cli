@@ -1134,11 +1134,7 @@ def families(ctx: typer.Context) -> None:
 def list_instances(
     ctx: typer.Context,
     ids: Optional[List[str]] = typer.Option(None, "--id", help="Instance ID; repeatable."),
-    region: Optional[str] = typer.Option(
-        None,
-        "--region",
-        help="Filter by region; must be used with --zone.",
-    ),
+    region: Optional[str] = typer.Option(None, "--region", help="Filter by region."),
     zone: Optional[str] = typer.Option(
         None,
         "--zone",
@@ -1164,8 +1160,8 @@ def list_instances(
 ) -> None:
     """List instances."""
     state = runtime(ctx)
-    if (region is None) != (zone is None):
-        raise UsageError(tr("--region and --zone must be provided together."))
+    if zone is not None and region is None:
+        raise UsageError(tr("--zone requires --region."))
     params = request(ctx, region_value=region)
     params.update(
         compact(
@@ -2580,6 +2576,95 @@ def list_software(
         list_key="SoftwarePort",
         columns=(("Software", "SOFTWARE"), ("Port", "PORT")),
     )
+
+
+def _cpod_command_failed(state: Runtime, details: Dict[str, Any]) -> None:
+    if not state.json_output and details.get("output"):
+        typer.echo(details["output"], nl=False)
+    Renderer(state.json_output, state.show_sensitive).coded_error(
+        "remote_command_failed", tr("CPod command execution failed."), details=details
+    )
+    raise typer.Exit(1)
+
+
+@app.command("exec", help="Run Bash in a CPod instance through the cloud API.")
+def exec_cpod_command(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="CPod instance ID."),
+    command: Optional[str] = typer.Argument(None, help="Bash command as a single argument."),
+    script: Optional[Path] = typer.Option(
+        None, "--file", help="Read a UTF-8 Bash script from a file."
+    ),
+    sync: bool = typer.Option(
+        False, "--sync", help="Wait for output instead of returning a task ID."
+    ),
+) -> None:
+    if not instance.startswith("cpod-") or instance == "cpod-":
+        raise UsageError(tr("A CPod instance ID must start with cpod-."))
+    if (command is None) == (script is None):
+        raise UsageError(tr("Provide either a Bash command or --file."))
+
+    limit = 256 * 1024
+    try:
+        if script is not None:
+            with script.open("rb") as stream:
+                raw = stream.read(limit + 1)
+        else:
+            raw = (command or "").encode("utf-8")
+        if not raw or b"\x00" in raw or len(raw) > limit:
+            raise UsageError(tr("Command must be non-empty, NUL-free, and at most 256 KiB."))
+        command = raw.decode("utf-8")
+    except (OSError, UnicodeError) as error:
+        raise UsageError(tr("Cannot read the Bash command as UTF-8.")) from error
+
+    state = runtime(ctx)
+    response = call(
+        state,
+        "RunCompShareInstanceCommand",
+        {"InstanceId": instance, "Command": command, "Type": "sync" if sync else "async"},
+    )
+    if response.get("RetCode") != 0:
+        _cpod_command_failed(
+            state,
+            {"ret_code": response.get("RetCode"), "output": response.get("Output", "")},
+        )
+    if sync and not state.json_output:
+        typer.echo(response.get("Output", ""), nl=False)
+    else:
+        Renderer(state.json_output, state.show_sensitive).data(response)
+
+
+@app.command("exec-result", help="Get the result of an asynchronous CPod command.")
+def exec_cpod_result(
+    ctx: typer.Context,
+    task_id: str = typer.Argument(..., help="Task ID returned by instance exec."),
+) -> None:
+    if not task_id.strip():
+        raise UsageError(tr("Task ID must not be empty."))
+
+    state = runtime(ctx)
+    response = call(state, "GetCompShareInstanceCommandResult", {"TaskId": task_id})
+    renderer = Renderer(state.json_output, state.show_sensitive)
+    if response.get("Status") == "Finished":
+        result = response.get("Result")
+        if not isinstance(result, dict) or type(result.get("RetCode")) is not int:
+            renderer.coded_error(
+                "invalid_response",
+                tr("The API did not return a result for the finished CPod command."),
+                details={"task_id": task_id},
+            )
+            raise typer.Exit(1)
+        if result["RetCode"] != 0:
+            _cpod_command_failed(
+                state,
+                {
+                    "task_id": task_id,
+                    "status": "Finished",
+                    "ret_code": result["RetCode"],
+                    "output": result.get("Output", ""),
+                },
+            )
+    renderer.data(response)
 
 
 @job_app.command("submit", help="Submit a durable remote job and return immediately.")

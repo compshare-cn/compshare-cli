@@ -16,12 +16,12 @@ from compshare_cli.actions import (
 
 
 def test_public_action_counts() -> None:
-    assert len(INSTANCE_ACTIONS) == 27
+    assert len(INSTANCE_ACTIONS) == 29
     assert len(IMAGE_ACTIONS) == 16
     assert len(STORAGE_ACTIONS) == 16
     assert len(TEAM_ACTIONS) == 17
     assert len(BANDWIDTH_ACTIONS) == 8
-    assert len(PUBLIC_ACTIONS) == 84
+    assert len(PUBLIC_ACTIONS) == 86
 
 
 def test_every_available_public_action_is_wired_into_a_command() -> None:

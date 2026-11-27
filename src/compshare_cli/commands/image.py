@@ -154,6 +154,9 @@ def list_images(
     autostart: Optional[bool] = typer.Option(
         None, "--autostart/--no-autostart", help="Filter by automatic startup support."
     ),
+    favorite: bool = typer.Option(
+        False, "--favorite", help="Show only favorited community images."
+    ),
     sort: Optional[str] = typer.Option(None, "--sort", help="Community sort field."),
     ascending: bool = typer.Option(False, "--ascending", help="Sort in ascending order."),
     user: Optional[int] = typer.Option(None, "--user", help="Organization ID for source=user."),
@@ -183,6 +186,7 @@ def list_images(
             "IsFree": free,
             "IsOfficial": official,
             "IfAutoStart": autostart,
+            "IfFavorite": True if favorite else None,
             "SortCondition": {"Field": sort, "ASC": ascending} if sort else None,
             "TargetTopOrganizationId": user,
         }
@@ -200,6 +204,7 @@ def list_images(
             "IsFree",
             "IsOfficial",
             "IfAutoStart",
+            "IfFavorite",
             "SortCondition",
         },
         "shared": {"CompShareImageId"},
@@ -349,7 +354,11 @@ def create(
             progress_params["CompShareImageId"] = image_id
             current = call(state, "GetCompShareImageCreateProgress", progress_params)
             status = str(current.get("Status") or current.get("State") or "Creating")
-            percent = current.get("Progress") or current.get("Percent")
+            percent = current.get("Process")
+            if percent is None:
+                percent = current.get("Progress")
+            if percent is None:
+                percent = current.get("Percent")
             display = f"{status} ({percent}%)" if percent is not None else status
             if display != previous and not state.json_output:
                 typer.echo(tr("Waiting for image {image}: {state}", image=image_id, state=display))

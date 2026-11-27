@@ -30,6 +30,7 @@ from compshare_cli.mcp_server import (
         ["storage", "cfs", "detach", "--instance", "cpod-1", "--dry-run"],
         ["storage", "us3", "attach", "--instance", "cpod-1", "--dry-run"],
         ["instance", "monitor", "uhost-1"],
+        ["instance", "exec-result", "task-1"],
         ["team", "billing", "summary", "--team", "1"],
         ["instance", "create", "--dry-run"],
         ["instance", "resize", "uhost-1", "--dry-run"],
@@ -74,6 +75,7 @@ def test_classifies_write_commands(args) -> None:
         (["instance", "list", "--show-sensitive"], "managed by the MCP bridge"),
         (["instance", "job", "logs", "uhost-1", "job-1", "--follow"], "not supported"),
         (["instance", "ssh", "uhost-1"], "interactive SSH"),
+        (["instance", "exec", "cpod-1", "nvidia-smi"], "managed outside"),
         (["team", "billing", "export"], "managed outside"),
         (["feedback", "bug", "message"], "unsupported"),
         (["made-up", "command"], "unsupported"),
@@ -89,6 +91,12 @@ def test_remote_command_flags_are_not_treated_as_bridge_flags() -> None:
         classify_command(["instance", "ssh", "uhost-1", "--", "echo", "--show-sensitive"])
         is CommandKind.WRITE
     )
+
+
+def test_bridge_accepts_video_prompts_at_the_api_limit() -> None:
+    assert classify_command(["minimax", "create", "猫" * 10000, "--dry-run"]) is CommandKind.READ
+    with pytest.raises(MCPBridgeError, match="10000 characters"):
+        classify_command(["minimax", "create", "猫" * 10001, "--dry-run"])
 
 
 def _visible_leaf_commands() -> set[tuple[str, ...]]:

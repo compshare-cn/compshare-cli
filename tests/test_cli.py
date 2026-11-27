@@ -3076,15 +3076,16 @@ def test_instance_list_applies_global_pagination_after_filters(monkeypatch) -> N
     assert [item["UHostId"] for item in payload["data"]["items"]] == ["a-3", "b-1"]
 
 
-def test_instance_list_requires_region_and_zone_together(capsys) -> None:
+def test_instance_list_requires_region_with_zone(capsys) -> None:
     with pytest.raises(SystemExit) as raised:
-        cli.main(["--json", "instance", "list", "--region", "cn-sh2"])
+        cli.main(["--json", "instance", "list", "--zone", "cn-sh2-02"])
 
     assert raised.value.code == 2
     assert "--region" in _json_error(capsys.readouterr().out)["message"]
 
 
-def test_instance_list_passes_explicit_region_and_zone(monkeypatch) -> None:
+@pytest.mark.parametrize("zone", [None, "cn-sh2-02"])
+def test_instance_list_passes_explicit_region_and_optional_zone(monkeypatch, zone) -> None:
     calls = []
 
     def fake_pages(state, action, params, list_key, **kwargs):
@@ -3092,24 +3093,18 @@ def test_instance_list_passes_explicit_region_and_zone(monkeypatch) -> None:
         return {"UHostSet": []}
 
     monkeypatch.setattr(instance, "collect_pages", fake_pages)
-    result = runner.invoke(
-        cli.app,
-        [
-            "--json",
-            "instance",
-            "list",
-            "--region",
-            "cn-sh2",
-            "--zone",
-            "cn-sh2-02",
-        ],
-    )
+    args = ["--json", "instance", "list", "--region", "cn-sh2"]
+    params = {"Region": "cn-sh2"}
+    if zone is not None:
+        args.extend(["--zone", zone])
+        params["Zone"] = zone
+    result = runner.invoke(cli.app, args)
 
     assert result.exit_code == 0, result.output
     assert calls == [
         (
             "DescribeCompShareInstance",
-            {"Region": "cn-sh2", "Zone": "cn-sh2-02"},
+            params,
             "UHostSet",
         )
     ]

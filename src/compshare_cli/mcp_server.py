@@ -23,6 +23,7 @@ _READ_COMMANDS = {
     ("instance", "families"),
     ("instance", "list"),
     ("instance", "show"),
+    ("instance", "exec-result"),
     ("instance", "monitor"),
     ("instance", "wait"),
     ("instance", "price"),
@@ -155,6 +156,7 @@ _BLOCKED_COMMAND_PREFIXES = {
     ("config",),
     ("version",),
     ("instance", "scp"),
+    ("instance", "exec"),
     ("instance", "upgrade-price"),
     ("team", "billing", "export"),
 }
@@ -221,7 +223,7 @@ _CHILD_ENVIRONMENT = {
     "WINDIR",
 }
 _MAX_ARGS = 128
-_MAX_ARG_LENGTH = 8192
+_MAX_ARG_LENGTH = 10000
 _MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 _MAX_TIMEOUT_SECONDS = 900
 

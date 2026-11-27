@@ -7,7 +7,7 @@
 - 支持可断线恢复的远程任务、状态查询和增量日志读取
 - 支持社区/自定义镜像、云盘、CFS 文件存储、团队额度与账单
 - 支持独享带宽询价、购买、改配、退款预估及实例 EIP 切换
-- 支持 MiniMax H3 视频、Qwen-Image 图片和 IndexTTS 2.5 语音任务，以及素材上传、视频 Skill 和积分查询
+- 支持 MiniMax H3 视频、Qwen-Image 与 MiniMax-H3-Image 图片、IndexTTS 2.5 与 IndexTTS2 语音任务，以及素材上传、视频 Skill 和积分查询
 - 默认中文帮助，可切换英文；所有命令支持 JSON 输出
 
 ## 安装
@@ -29,6 +29,8 @@ npx skills add compshare-cn/compshare-cli --skill compshare-cli
 
 ## 配置
 
+在控制台的「账户中心 → API 密钥」创建 GPU OpenAPI 公钥和私钥，再运行以下命令。[管理 GPU API 密钥](https://console.compshare.cn/uaccount/api_manage)
+
 ```bash
 compshare config --name default
 ```
@@ -47,9 +49,11 @@ compshare --profile production instance list
 export COMPSHARE_PUBLIC_KEY='...'
 export COMPSHARE_PRIVATE_KEY='...'
 
-# MiniMax H3 使用独立的模型 API Key
+# 视频、图片和语音任务使用视频工作台的模型 API Key
 export COMPSHARE_MINIMAX_API_KEY='sk-ml-...'
 ```
+
+在视频工作台的左侧「API」入口创建 `sk-ml-` 密钥。[获取工作台 API Key](https://compshare.cn/docs/minimax-h3/api/minimax-h3-video-api#获取-api-key)
 
 ## 快速开始
 
@@ -74,6 +78,12 @@ compshare -h
 compshare instance -h
 ```
 
+容器实例可用 `compshare --json instance exec cpod-xxx 'nvidia-smi'` 通过 OpenAPI 提交命令，再用 `compshare --json instance exec-result TASK_ID` 查询结果。[容器命令 OpenAPI](https://compshare.cn/docs/gpus/instance/runcompshareinstancecommand)
+
+生成原生 1080P 视频时，使用 `minimax create --resolution 1080P` 并将 `--duration` 设为 4–15 秒。视频提示词最长 10,000 字符。[H3 视频 API](https://compshare.cn/docs/minimax-h3/api/minimax-h3-video-api)
+
+图片任务可用 `minimax image create --model MiniMax-H3-Image` 选用 H3，语音任务可用 `minimax audio create --model indextts2` 选用 IndexTTS2。[H3 图片 API](https://compshare.cn/docs/minimax-h3/api/minimax-h3-image-api) · [IndexTTS2 API](https://compshare.cn/docs/minimax-h3/api/indextts2-api)
+
 ## 命令概览
 
 ```text
@@ -86,6 +96,19 @@ compshare bandwidth  独享带宽和实例 EIP 带宽归属
 compshare minimax    MiniMax H3 视频、图片、语音、Skill 和积分
 compshare team       团队、邀请、成员额度、账单和审计
 ```
+
+## 云存储 Pro（CFS）
+
+通过 `storage cfs` 管理容器可用区的文件存储，支持 50–2048 GiB。`create --dry-run` 会返回购买报价，`attach --dry-run` 会显示挂载计划。
+
+```bash
+compshare --json storage cfs list
+compshare --json storage cfs create --name training --size 100GiB \
+  --region cn-bj2 --zone cn-bj2-03 --dry-run
+compshare --json storage cfs attach --instance CPOD_ID --dry-run
+```
+
+同可用区没有 CFS 时，`storage cfs attach` 和针对 `cpod-` 实例的 `storage us3 attach` 会自动购买 50 GiB 的月付存储。挂载或卸载可能重启运行中的实例，也可用 `--project` 指定实例所属项目。创建实例时使用 `instance create --cfs` 只关联同可用区已有的 CFS。[云存储 Pro 接口](https://compshare.cn/docs/gpus/data/cfs)
 
 ## WorkBuddy Connector
 

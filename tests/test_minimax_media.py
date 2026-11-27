@@ -28,8 +28,19 @@ def api_key(monkeypatch):
     monkeypatch.setenv("COMPSHARE_MINIMAX_API_KEY", "sk-ml-test")
 
 
-@pytest.mark.parametrize("resolution", [[], ["--resolution", "1K"]])
-def test_image_create_sends_documented_payload(monkeypatch, resolution):
+@pytest.mark.parametrize(
+    "options,aspect_ratio,expected",
+    [
+        ([], "16:9", {"resolution": "1K"}),
+        (["--resolution", "1K"], "16:9", {"resolution": "1K"}),
+        (
+            ["--model", "MiniMax-H3-Image", "--resolution", "4K"],
+            "21:9",
+            {"resolution": "4K", "model": "MiniMax-H3-Image"},
+        ),
+    ],
+)
+def test_image_create_sends_documented_payload(monkeypatch, options, aspect_ratio, expected):
     captured = {}
 
     def fake_urlopen(req, timeout):
@@ -50,9 +61,9 @@ def test_image_create_sends_documented_payload(monkeypatch, resolution):
             "image",
             "create",
             "一只猫",
-            *resolution,
+            *options,
             "--ratio",
-            "16:9",
+            aspect_ratio,
             "--reference-asset",
             "asset-1",
             "--optimize-prompt",
@@ -67,11 +78,32 @@ def test_image_create_sends_documented_payload(monkeypatch, resolution):
     assert captured["headers"]["Idempotency-key"] == "image-key"
     assert captured["body"] == {
         "prompt": "一只猫",
-        "resolution": "1K",
-        "aspect_ratio": "16:9",
+        "aspect_ratio": aspect_ratio,
         "optimize_prompt": True,
         "reference_images": [{"asset_id": "asset-1"}],
+        **expected,
     }
+
+
+def test_image_config_selects_h3_model(monkeypatch):
+    def fake_urlopen(req, timeout):
+        assert req.full_url == "https://cp.compshare.cn/image/v1/config?model=MiniMax-H3-Image"
+        return FakeResponse({"model": "MiniMax-H3-Image", "available": True})
+
+    monkeypatch.setattr(minimax.request, "urlopen", fake_urlopen)
+    result = runner.invoke(
+        cli.app, ["--json", "minimax", "image", "config", "--model", "MiniMax-H3-Image"]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["model"] == "MiniMax-H3-Image"
+
+
+@pytest.mark.parametrize("options", [["--resolution", "4K"], ["--ratio", "5:4"]])
+def test_qwen_image_rejects_h3_only_options(options):
+    result = runner.invoke(
+        cli.app, ["--json", "minimax", "image", "create", "一只猫", *options, "--dry-run"]
+    )
+    assert result.exit_code != 0
 
 
 def test_image_list_repeats_status_query(monkeypatch):
@@ -93,7 +125,8 @@ def test_image_list_repeats_status_query(monkeypatch):
     )
 
 
-def test_audio_create_sends_voice_and_emotion(monkeypatch):
+@pytest.mark.parametrize("model", [None, "indextts2"])
+def test_audio_create_sends_voice_and_emotion(monkeypatch, model):
     captured = {}
 
     def fake_urlopen(req, timeout):
@@ -109,6 +142,7 @@ def test_audio_create_sends_voice_and_emotion(monkeypatch):
             "audio",
             "create",
             "欢迎来到重庆",
+            *(["--model", model] if model else []),
             "--voice-source",
             "asset",
             "--asset-id",
@@ -142,6 +176,7 @@ def test_audio_create_sends_voice_and_emotion(monkeypatch):
         "pronunciations": [{"word": "重庆", "kind": "pinyin", "value": "chong2 qing4"}],
         "save_voice": True,
         "voice_name": "我的音色",
+        **({"model": model} if model else {}),
     }
 
 
@@ -160,6 +195,28 @@ def test_audio_create_sends_voice_and_emotion(monkeypatch):
         ],
         ["create", "你好", "--voice-id", "v1", "--pronunciation", "bad", "--dry-run"],
         ["create", "你好", "--voice-id", "v1", "--speed", "nan", "--dry-run"],
+        [
+            "create",
+            "ねこ",
+            "--voice-id",
+            "v1",
+            "--model",
+            "indextts2",
+            "--language",
+            "JA",
+            "--dry-run",
+        ],
+        [
+            "create",
+            "hello",
+            "--voice-id",
+            "v1",
+            "--model",
+            "indextts2",
+            "--pronunciation",
+            "hello:cmu:HH AH0 L OW1",
+            "--dry-run",
+        ],
     ],
 )
 def test_audio_create_rejects_invalid_options(args):
